@@ -211,6 +211,17 @@ HTML_PAGE = """<!DOCTYPE html>
 
   <div class="mt"><button class="btn-amber" onclick="saveSettings()">Speichern</button></div>
   <div id="settingsStatus" class="hidden"></div>
+
+  <hr style="margin:1.2rem 0;border-color:var(--border)">
+  <h3>Backup</h3>
+  <div class="flex gap-sm wrap">
+    <a id="backupLink" class="btn-green" style="text-decoration:none;display:inline-block" onclick="this.href=B+'/api/backup'">Backup herunterladen (.zip)</a>
+    <label class="btn-amber" style="cursor:pointer;display:inline-block">
+      Backup importieren
+      <input type="file" accept=".zip" onchange="importBackup(this)" style="display:none">
+    </label>
+  </div>
+  <div id="backupStatus" class="hidden"></div>
 </div>
 
 <script>
@@ -261,6 +272,8 @@ async function delSpeaker(n){if(!confirm('Sprecher und alle Proben löschen?'))r
 // Settings
 async function loadSettings(){try{var d=await(await fetch(B+'/api/settings')).json();$('settingThreshold').value=d.similarity_threshold;$('settingThresholdRange').value=d.similarity_threshold;$('settingUnknown').value=d.unknown_label;$('settingSaveUnknown').checked=d.save_unknown}catch(e){}}
 async function saveSettings(){var el=$('settingsStatus');try{var d=await(await fetch(B+'/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({similarity_threshold:parseFloat($('settingThreshold').value),unknown_label:$('settingUnknown').value.trim(),save_unknown:$('settingSaveUnknown').checked})})).json();msg('settingsStatus',d.success?'Gespeichert':E(d.error),d.success?'ok':'err')}catch(e){msg('settingsStatus',e.message,'err')}}
+
+async function importBackup(inp){if(!inp.files[0])return;var fd=new FormData();fd.append('backup',inp.files[0]);msg('backupStatus','Importiere...','info');try{var d=await(await fetch(B+'/api/backup',{method:'POST',body:fd})).json();if(d.success){msg('backupStatus','Import: '+d.speakers+' Sprecher, '+d.samples+' Proben','ok');load()}else msg('backupStatus',E(d.error),'err')}catch(e){msg('backupStatus',e.message,'err')}inp.value=''}
 
 fetch(B+'/api/learn').then(function(r){return r.json()}).then(function(d){learnSpeaker=d.speaker||null;load()}).catch(function(){load()});
 loadSettings();initUI();
@@ -414,6 +427,64 @@ def create_web_app(speaker_db: SpeakerDatabase) -> web.Application:
         except Exception as e:
             return web.json_response({"success": False, "error": str(e)})
 
+    async def backup_download(request):
+        """Download all profiles as a zip file."""
+        import zipfile
+        import io
+        import time
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for speaker_dir in sorted(speaker_db.profiles_dir.iterdir()):
+                if not speaker_dir.is_dir() or speaker_dir.name.startswith("."):
+                    continue
+                for f in sorted(speaker_dir.iterdir()):
+                    if f.is_file() and not f.name.startswith("."):
+                        zf.write(f, f"{speaker_dir.name}/{f.name}")
+        buf.seek(0)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        return web.Response(
+            body=buf.read(),
+            content_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="speaker_id_backup_{ts}.zip"'},
+        )
+
+    async def backup_import(request):
+        """Import a zip backup, merging with existing profiles."""
+        import zipfile
+        import io
+        try:
+            reader = await request.multipart()
+            zip_data = None
+            async for part in reader:
+                if part.name == "backup":
+                    zip_data = await part.read()
+            if not zip_data:
+                return web.json_response({"success": False, "error": "Keine Datei"})
+            buf = io.BytesIO(zip_data)
+            speakers_added = set()
+            samples_count = 0
+            with zipfile.ZipFile(buf, 'r') as zf:
+                for info in zf.infolist():
+                    if info.is_dir() or info.filename.startswith("."):
+                        continue
+                    parts = info.filename.split("/")
+                    if len(parts) != 2:
+                        continue
+                    speaker_name, filename = parts
+                    if filename.startswith("."):
+                        continue
+                    dest_dir = speaker_db.profiles_dir / speaker_name
+                    dest_dir.mkdir(parents=True, exist_ok=True)
+                    dest = dest_dir / filename
+                    if not dest.exists():
+                        dest.write_bytes(zf.read(info.filename))
+                        samples_count += 1
+                    speakers_added.add(speaker_name)
+            return web.json_response({"success": True, "speakers": len(speakers_added), "samples": samples_count})
+        except Exception as e:
+            _LOGGER.exception("Backup import failed")
+            return web.json_response({"success": False, "error": str(e)})
+
     async def identify(request):
         """Handle test identification."""
         try:
@@ -457,6 +528,8 @@ def create_web_app(speaker_db: SpeakerDatabase) -> web.Application:
         app.router.add_get(prefix + "/api/audio/{name}/{filename}", serve_audio)
         app.router.add_get(prefix + "/api/settings", get_settings)
         app.router.add_post(prefix + "/api/settings", post_settings)
+        app.router.add_get(prefix + "/api/backup", backup_download)
+        app.router.add_post(prefix + "/api/backup", backup_import)
     app.router.add_get("/speaker-id", lambda r: web.HTTPFound("/speaker-id/"))
 
     return app
