@@ -174,4 +174,6 @@ The add-on needs ~300MB RAM for the Resemblyzer model. Speaker profiles are a fe
 
 ## License
 
-MIT
+MIT — see below.
+
+**This software is provided "as is", without warranty of any kind. The author is not responsible for any damages, data loss, API costs, or other issues arising from the use of this add-on. Use at your own risk.**
