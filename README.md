@@ -1,5 +1,8 @@
 # Wyoming Speaker ID
 
+> **Disclaimer**
+> This add-on was built in a single session with Claude (AI) at maximum speed. The code works, but it's AI slop — expect rough edges, minimal tests, and creative engineering decisions. Contributions welcome: fork it, open PRs, file issues. If something breaks, it probably does.
+
 🎙️ **Sprechererkennung für Home Assistant Voice Pipeline**
 
 Ein Home Assistant Add-on, das erkennt *wer* gerade spricht und das Transkript entsprechend anreichert. Unterstützt **OpenAI Whisper API**, **Google Cloud STT** und lokales **Wyoming/Whisper** als STT-Backend.
