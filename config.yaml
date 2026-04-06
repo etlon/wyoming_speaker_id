@@ -1,0 +1,55 @@
+---
+name: "Wyoming Speaker ID"
+version: "0.2.0"
+slug: wyoming_speaker_id
+description: >
+  Speaker recognition for Home Assistant voice pipeline.
+  Identifies who is speaking and enriches the transcript.
+  Supports OpenAI Whisper API, Google Cloud STT, or local Wyoming STT.
+
+arch:
+  - aarch64
+  - amd64
+
+init: false
+startup: application
+boot: auto
+
+ports:
+  10310/tcp: 10310
+  8756/tcp: 8756
+ports_description:
+  10310/tcp: "Wyoming STT proxy port"
+  8756/tcp: "Speaker enrollment web UI"
+
+map:
+  - share:rw
+  - media:ro
+
+options:
+  stt_provider: "openai"
+  openai_api_key: ""
+  openai_model: "whisper-1"
+  google_api_key: ""
+  google_model: "latest_long"
+  upstream_stt_host: "core-whisper"
+  upstream_stt_port: 10300
+  similarity_threshold: 0.75
+  unknown_speaker_label: "Unbekannt"
+  language: "de"
+  debug: false
+
+schema:
+  stt_provider: "list(openai|google|wyoming)"
+  openai_api_key: "str?"
+  openai_model: str
+  google_api_key: "str?"
+  google_model: str
+  upstream_stt_host: str
+  upstream_stt_port: port
+  similarity_threshold: float
+  unknown_speaker_label: str
+  language: str
+  debug: bool
+
+panel_icon: mdi:account-voice

@@ -1,0 +1,58 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# ==============================================================================
+# Wyoming Speaker ID — Main service
+# ==============================================================================
+
+declare stt_provider
+declare similarity_threshold
+declare unknown_label
+declare language
+declare debug
+
+stt_provider=$(bashio::config 'stt_provider')
+similarity_threshold=$(bashio::config 'similarity_threshold')
+unknown_label=$(bashio::config 'unknown_speaker_label')
+language=$(bashio::config 'language')
+debug=$(bashio::config 'debug')
+
+args=()
+args+=(--host "0.0.0.0")
+args+=(--port 10310)
+args+=(--web-port 8756)
+args+=(--stt-provider "${stt_provider}")
+args+=(--similarity-threshold "${similarity_threshold}")
+args+=(--unknown-label "${unknown_label}")
+args+=(--language "${language}")
+args+=(--profiles-dir "/data/profiles")
+
+# Provider-specific config
+if [ "${stt_provider}" = "openai" ]; then
+    openai_key=$(bashio::config 'openai_api_key')
+    openai_model=$(bashio::config 'openai_model')
+    args+=(--openai-api-key "${openai_key}")
+    args+=(--openai-model "${openai_model}")
+    bashio::log.info "STT Provider: OpenAI (${openai_model})"
+
+elif [ "${stt_provider}" = "google" ]; then
+    google_key=$(bashio::config 'google_api_key')
+    google_model=$(bashio::config 'google_model')
+    args+=(--google-api-key "${google_key}")
+    args+=(--google-model "${google_model}")
+    bashio::log.info "STT Provider: Google (${google_model})"
+
+elif [ "${stt_provider}" = "wyoming" ]; then
+    upstream_host=$(bashio::config 'upstream_stt_host')
+    upstream_port=$(bashio::config 'upstream_stt_port')
+    args+=(--upstream-host "${upstream_host}")
+    args+=(--upstream-port "${upstream_port}")
+    bashio::log.info "STT Provider: Wyoming (${upstream_host}:${upstream_port})"
+fi
+
+if bashio::var.true "${debug}"; then
+    args+=(--debug)
+fi
+
+bashio::log.info "Starting Wyoming Speaker ID v0.2.0..."
+
+exec python3 -m speaker_id "${args[@]}"
