@@ -1,7 +1,7 @@
 # Wyoming Speaker ID
 
 > **Disclaimer**
-> This add-on was built in a single session with Claude (AI) at maximum speed. The code works, but it's AI slop — expect rough edges, minimal tests, and creative engineering decisions. Contributions welcome: fork it, open PRs, file issues. If something breaks, it probably does.
+> This add-on was built in a single session with Claude (AI) at maximum speed. The code works, but it's AI slop — expect rough edges, minimal tests, and creative engineering decisions. Contributions welcome: fork it, open PRs, file issues. If something breaks, it probably does. Even this disclaimer was made with ai lol
 
 ## What is this?
 
