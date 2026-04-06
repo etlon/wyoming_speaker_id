@@ -115,6 +115,15 @@ Must be its own `RUN` step with `--index-url https://download.pytorch.org/whl/cp
 - HTTPS required for mic (getUserMedia). Falls back to file upload over HTTP.
 - NPM custom location: `/speaker-id` → `http://192.168.2.28:8756`
 
+## Training Best Practices
+
+- **Optimal samples**: 10-15 clips of 5-15 seconds each, recorded across different sessions
+- **Diminishing returns** after ~10-15s per clip — embedding stabilizes, longer clips aren't proportionally better
+- **Variety matters more than length** — different words, intonation, energy levels, times of day
+- **Learn mode is ideal**: captures 2-8s voice commands naturally. Use satellite normally for a day, delete noisy/short captures, train.
+- **Very short clips (<3s)**: unreliable, not enough speech data
+- **Very long clips (>30s)**: fine but no significant advantage over 10-15s
+
 ## Audio Processing
 
 - Web UI: webm/opus → ffmpeg → 16kHz mono float32 [-1, 1]
