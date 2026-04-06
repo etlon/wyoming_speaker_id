@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import logging
 import sys
+from pathlib import Path
 
 from aiohttp import web
 
@@ -31,7 +32,7 @@ def main():
     parser.add_argument("--upstream-port", type=int, default=10300)
 
     # Speaker ID
-    parser.add_argument("--profiles-dir", default="/data/profiles")
+    parser.add_argument("--profiles-dir", default="/share/wyoming-speaker-id/profiles")
     parser.add_argument("--similarity-threshold", type=float, default=0.75)
     parser.add_argument("--unknown-label", default="Unbekannt")
     parser.add_argument("--language", default="de")

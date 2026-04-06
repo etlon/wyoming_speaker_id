@@ -16,6 +16,21 @@ from .stt_backends import STTBackend
 _LOGGER = logging.getLogger(__name__)
 
 
+# Module-level learn mode state (shared across handler instances)
+_learn_mode_speaker: str | None = None
+
+
+def set_learn_mode(speaker_name: str | None):
+    """Enable or disable learn mode. When enabled, pipeline audio is saved as samples."""
+    global _learn_mode_speaker
+    _learn_mode_speaker = speaker_name
+    _LOGGER.info("Learn mode: %s", speaker_name or "OFF")
+
+
+def get_learn_mode() -> str | None:
+    return _learn_mode_speaker
+
+
 class SpeakerIdHandler(AsyncEventHandler):
     """Handles Wyoming events: collects audio, identifies speaker, runs STT."""
 
@@ -74,6 +89,14 @@ class SpeakerIdHandler(AsyncEventHandler):
             audio_bytes = bytes(self._audio_buffer)
             self._audio_buffer.clear()
 
+            # Learn mode: save pipeline audio as a training sample
+            if _learn_mode_speaker and duration >= 1.0:
+                import time
+                filename = f"pipeline_{int(time.time())}.wav"
+                self._save_pipeline_audio(audio_bytes, _learn_mode_speaker, filename)
+                _LOGGER.info("Learn mode: saved %.1fs audio for '%s' as %s",
+                             duration, _learn_mode_speaker, filename)
+
             # Run speaker identification and STT in parallel
             speaker_task = asyncio.get_running_loop().run_in_executor(
                 None, self._identify_speaker, audio_bytes
@@ -112,6 +135,26 @@ class SpeakerIdHandler(AsyncEventHandler):
 
         _LOGGER.debug("Unhandled event type: %s", event.type)
         return True
+
+    def _save_pipeline_audio(self, audio_bytes: bytes, speaker_name: str, filename: str):
+        """Save raw pipeline audio as a WAV file in the speaker's folder."""
+        import struct
+        wav_data = self._pcm_to_wav(audio_bytes)
+        self.speaker_db.save_sample(speaker_name, wav_data, filename)
+
+    def _pcm_to_wav(self, pcm_bytes: bytes) -> bytes:
+        """Wrap raw PCM bytes in a WAV header."""
+        import struct
+        import io
+        rate = self._audio_rate
+        width = self._audio_width
+        channels = self._audio_channels
+        data_len = len(pcm_bytes)
+        header = struct.pack('<4sI4s4sIHHIIHH4sI',
+            b'RIFF', 36 + data_len, b'WAVE',
+            b'fmt ', 16, 1, channels, rate, rate * channels * width, channels * width, width * 8,
+            b'data', data_len)
+        return header + pcm_bytes
 
     def _identify_speaker(self, audio_bytes: bytes):
         """Run speaker identification (runs in executor)."""

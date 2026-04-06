@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 from aiohttp import web
 
+from .handler import set_learn_mode, get_learn_mode
 from .speaker_db import SpeakerDatabase
 
 _LOGGER = logging.getLogger(__name__)
@@ -77,56 +78,38 @@ HTML_PAGE = """<!DOCTYPE html>
 
 <h1>🎙️ Speaker ID — Sprecherverwaltung</h1>
 
-<!-- Enrolled Speakers -->
+<!-- Speakers + Samples -->
+<div id="speakerList"></div>
+
+<!-- Add Speaker / Add Samples -->
 <div class="card">
-  <h2>Registrierte Sprecher</h2>
-  <ul class="speaker-list" id="speakerList">
-    <li class="speaker-item" style="color: var(--muted)">Lade...</li>
-  </ul>
-</div>
+  <h2 id="enrollTitle">Neuen Sprecher hinzufügen</h2>
 
-<!-- Enrollment -->
-<div class="card">
-  <h2>Neuen Sprecher registrieren</h2>
-
-  <label for="speakerName">Name</label>
-  <input type="text" id="speakerName" placeholder="z.B. Max">
-
-  <label for="speakerUserId">Home Assistant User-ID (optional)</label>
-  <input type="text" id="speakerUserId" placeholder="wird automatisch generiert">
+  <label for="speakerName">Name (= Ordnername)</label>
+  <input type="text" id="speakerName" placeholder="z.B. Cedric">
 
   <p class="samples-info">
-    Nimm 3 Sprachproben auf (je 3-8 Sekunden). Sprich natürlich — z.B. verschiedene Sätze.
+    Sprachproben aufnehmen oder hochladen (je 3-8 Sekunden, mind. 2-3 Proben empfohlen).
   </p>
 
   <!-- Secure context: mic recording -->
   <div id="micEnroll">
-    <div class="progress-dots" id="progressDots">
-      <div class="dot" id="dot0"></div>
-      <div class="dot" id="dot1"></div>
-      <div class="dot" id="dot2"></div>
-    </div>
     <button class="btn-primary" id="recordBtn" onclick="toggleRecording()">
       Aufnahme starten
     </button>
+    <span id="sampleCount" class="samples-info"></span>
   </div>
 
   <!-- Insecure context fallback: file upload -->
   <div id="fileEnroll" class="hidden">
     <div class="status status-info" style="margin-bottom:1rem">
-      Mikrofon-Zugriff nur über HTTPS möglich. Bitte lade stattdessen Audiodateien hoch (WAV, MP3, OGG, WEBM).
+      Mikrofon-Zugriff nur über HTTPS möglich. Bitte lade Audiodateien hoch.
     </div>
-    <div class="progress-dots" id="fileProgressDots">
-      <div class="dot" id="fdot0"></div>
-      <div class="dot" id="fdot1"></div>
-      <div class="dot" id="fdot2"></div>
-    </div>
-    <label for="fileInput" style="display:inline" id="fileLabel">Probe 1/3 auswählen:</label>
-    <input type="file" id="fileInput" accept="audio/*" onchange="handleFileUpload(this)" style="margin:.5rem 0">
+    <input type="file" id="fileInput" accept="audio/*" multiple onchange="handleFileUpload(this)" style="margin:.5rem 0">
   </div>
 
-  <button class="btn-secondary hidden" id="enrollBtn" onclick="enrollSpeaker()">
-    Sprecher registrieren
+  <button class="btn-secondary hidden" id="enrollBtn" onclick="saveSamples()">
+    Proben speichern
   </button>
 
   <div id="statusBox" class="hidden"></div>
@@ -148,24 +131,15 @@ HTML_PAGE = """<!DOCTYPE html>
 </div>
 
 <script>
-let mediaRecorder = null;
-let audioChunks = [];
-let samples = [];
-let currentSample = 0;
-let isRecording = false;
-let hasMic = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
-let fileCurrentSample = 0;
-// Auto-detect base path from current URL (works behind reverse proxy)
-let basePath = window.location.pathname.endsWith('/') ? window.location.pathname.slice(0, -1) : window.location.pathname;
+var mediaRecorder = null;
+var audioChunks = [];
+var samples = [];
+var isRecording = false;
+var hasMic = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+var basePath = window.location.pathname.endsWith('/') ? window.location.pathname.slice(0, -1) : window.location.pathname;
 
-// --- HTML escape helper (XSS prevention) ---
-function esc(s) {
-  var d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
-}
+function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
-// --- Detect secure context and toggle UI ---
 function initUI() {
   if (hasMic) {
     document.getElementById('micEnroll').classList.remove('hidden');
@@ -177,246 +151,194 @@ function initUI() {
     document.getElementById('fileEnroll').classList.remove('hidden');
     document.getElementById('micTest').classList.add('hidden');
     document.getElementById('fileTest').classList.remove('hidden');
-    updateFileLabel();
   }
 }
 
-// --- File Upload Fallback ---
-function updateFileLabel() {
-  const label = document.querySelector('label[for="fileInput"]');
-  if (label) label.textContent = 'Probe ' + (fileCurrentSample + 1) + '/3 auswählen:';
-}
-
-function handleFileUpload(input) {
-  if (!input.files[0]) return;
-  samples.push(input.files[0]);
-  document.getElementById('fdot' + fileCurrentSample).classList.add('filled');
-  fileCurrentSample++;
-  input.value = '';
-  if (fileCurrentSample >= 3) {
-    document.getElementById('enrollBtn').classList.remove('hidden');
-    document.getElementById('fileInput').disabled = true;
-    showStatus('Alle 3 Proben geladen. Klicke auf "Sprecher registrieren".', 'ok');
-  } else {
-    showStatus('Probe ' + fileCurrentSample + '/3 geladen. Nächste Datei auswählen.', 'info');
-    updateFileLabel();
-  }
-}
-
-function handleTestFileUpload(input) {
-  if (!input.files[0]) return;
-  const file = input.files[0];
-  const formData = new FormData();
-  formData.append('audio', file, file.name);
-  showTestResult('Analysiere...', 'info');
-
-  fetch(basePath + '/api/identify', { method: 'POST', body: formData })
-    .then(r => r.json())
-    .then(data => {
-      if (data.speaker) {
-        showTestResult(
-          'Erkannt: <strong>' + esc(data.speaker) + '</strong> (Confidence: ' + (data.confidence * 100).toFixed(1) + '%)',
-          data.confidence >= 0.75 ? 'ok' : 'info'
-        );
-      } else {
-        showTestResult('Kein Sprecher erkannt.', 'err');
-      }
-    })
-    .catch(e => showTestResult('Fehler: ' + e.message, 'err'));
-  input.value = '';
-}
-
-// --- Mic Enrollment Recording ---
-function toggleRecording() {
-  if (isRecording) { stopRecording(); }
-  else { startRecording(); }
-}
+function toggleRecording() { if (isRecording) { stopRecording(); } else { startRecording(); } }
 
 async function startRecording() {
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true }
-    });
+    var stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true } });
     mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
     audioChunks = [];
-    mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
-    mediaRecorder.onstop = () => {
-      const blob = new Blob(audioChunks, { type: 'audio/webm' });
+    mediaRecorder.ondataavailable = function(e) { audioChunks.push(e.data); };
+    mediaRecorder.onstop = function() {
+      var blob = new Blob(audioChunks, { type: 'audio/webm' });
       samples.push(blob);
-      stream.getTracks().forEach(t => t.stop());
-      document.getElementById('dot' + currentSample).classList.remove('active');
-      document.getElementById('dot' + currentSample).classList.add('filled');
-      currentSample++;
-      if (currentSample >= 3) {
-        document.getElementById('enrollBtn').classList.remove('hidden');
-        showStatus('Alle 3 Proben aufgenommen. Klicke auf "Sprecher registrieren".', 'ok');
-      } else {
-        showStatus('Probe ' + currentSample + '/3 aufgenommen. Nächste Probe aufnehmen.', 'info');
-      }
+      stream.getTracks().forEach(function(t) { t.stop(); });
       isRecording = false;
       document.getElementById('recordBtn').textContent = 'Aufnahme starten';
       document.getElementById('recordBtn').classList.remove('recording');
+      document.getElementById('sampleCount').textContent = samples.length + ' Probe(n) aufgenommen';
+      document.getElementById('enrollBtn').classList.remove('hidden');
+      showStatus('Probe aufgenommen. Weitere aufnehmen oder speichern.', 'info');
     };
     mediaRecorder.start();
     isRecording = true;
     document.getElementById('recordBtn').textContent = 'Aufnahme stoppen';
     document.getElementById('recordBtn').classList.add('recording');
-    document.getElementById('dot' + currentSample).classList.add('active');
-    showStatus('Sprich jetzt... (Probe ' + (currentSample + 1) + '/3)', 'info');
-  } catch (e) {
-    showStatus('Mikrofon-Fehler: ' + e.message, 'err');
-  }
+    showStatus('Sprich jetzt...', 'info');
+  } catch (e) { showStatus('Mikrofon-Fehler: ' + e.message, 'err'); }
 }
 
-function stopRecording() {
-  if (mediaRecorder && mediaRecorder.state === 'recording') {
-    mediaRecorder.stop();
-  }
+function stopRecording() { if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop(); }
+
+function handleFileUpload(input) {
+  if (!input.files.length) return;
+  for (var i = 0; i < input.files.length; i++) { samples.push(input.files[i]); }
+  document.getElementById('enrollBtn').classList.remove('hidden');
+  showStatus(samples.length + ' Probe(n) ausgewählt.', 'info');
+  input.value = '';
 }
 
-async function enrollSpeaker() {
-  const name = document.getElementById('speakerName').value.trim();
+async function saveSamples() {
+  var name = document.getElementById('speakerName').value.trim();
   if (!name) { showStatus('Bitte einen Namen eingeben.', 'err'); return; }
-
-  let userId = document.getElementById('speakerUserId').value.trim();
-  if (!userId) userId = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString();
-
-  const formData = new FormData();
+  if (samples.length === 0) { showStatus('Bitte mindestens eine Probe aufnehmen.', 'err'); return; }
+  var formData = new FormData();
   formData.append('name', name);
-  formData.append('user_id', userId);
-  samples.forEach((s, i) => formData.append('sample_' + i, s, 'sample_' + i + '.webm'));
-
+  samples.forEach(function(s, i) {
+    var ext = (s.name && s.name.includes('.')) ? s.name.split('.').pop() : 'webm';
+    formData.append('sample_' + i, s, 'sample_' + Date.now() + '_' + i + '.' + ext);
+  });
   document.getElementById('enrollBtn').disabled = true;
-  showStatus('Verarbeite Sprachproben... (kann einige Sekunden dauern)', 'info');
-
+  showStatus('Speichere Proben...', 'info');
   try {
-    const res = await fetch(basePath + '/api/enroll', { method: 'POST', body: formData });
-    const data = await res.json();
+    var res = await fetch(basePath + '/api/enroll', { method: 'POST', body: formData });
+    var data = await res.json();
     if (data.success) {
-      showStatus('"' + name + '" erfolgreich registriert!', 'ok');
-      resetEnrollment();
+      showStatus(esc(name) + ': Profil gespeichert! (' + data.samples + ' Proben insgesamt)', 'ok');
+      samples = [];
+      document.getElementById('sampleCount').textContent = '';
+      document.getElementById('enrollBtn').classList.add('hidden');
+      document.getElementById('speakerName').value = '';
       loadSpeakers();
-    } else {
-      showStatus('Fehler: ' + data.error, 'err');
-    }
-  } catch (e) {
-    showStatus('Netzwerkfehler: ' + e.message, 'err');
-  }
+    } else { showStatus('Fehler: ' + esc(data.error), 'err'); }
+  } catch (e) { showStatus('Netzwerkfehler: ' + e.message, 'err'); }
   document.getElementById('enrollBtn').disabled = false;
 }
 
-function resetEnrollment() {
-  samples = [];
-  currentSample = 0;
-  fileCurrentSample = 0;
-  document.querySelectorAll('.dot').forEach(d => { d.classList.remove('filled', 'active'); });
-  document.getElementById('enrollBtn').classList.add('hidden');
-  document.getElementById('speakerName').value = '';
-  document.getElementById('speakerUserId').value = '';
-  if (!hasMic) {
-    document.getElementById('fileInput').disabled = false;
-    updateFileLabel();
-  }
-}
-
-// --- Test Recording ---
-let testRecording = false;
-function toggleTestRecording() {
-  if (testRecording) { stopTestRecording(); }
-  else { startTestRecording(); }
-}
-
+var testRecording = false;
+function toggleTestRecording() { if (testRecording) { stopTestRecording(); } else { startTestRecording(); } }
 async function startTestRecording() {
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true }
-    });
+    var stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true } });
     mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
     audioChunks = [];
-    mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
-    mediaRecorder.onstop = async () => {
-      const blob = new Blob(audioChunks, { type: 'audio/webm' });
-      stream.getTracks().forEach(t => t.stop());
+    mediaRecorder.ondataavailable = function(e) { audioChunks.push(e.data); };
+    mediaRecorder.onstop = async function() {
+      var blob = new Blob(audioChunks, { type: 'audio/webm' });
+      stream.getTracks().forEach(function(t) { t.stop(); });
       testRecording = false;
       document.getElementById('testRecordBtn').textContent = 'Test-Aufnahme';
       document.getElementById('testRecordBtn').classList.remove('recording');
-
-      const formData = new FormData();
+      var formData = new FormData();
       formData.append('audio', blob, 'test.webm');
       showTestResult('Analysiere...', 'info');
-
       try {
-        const res = await fetch(basePath + '/api/identify', { method: 'POST', body: formData });
-        const data = await res.json();
-        if (data.speaker) {
-          showTestResult(
-            'Erkannt: <strong>' + esc(data.speaker) + '</strong> (Confidence: ' + (data.confidence * 100).toFixed(1) + '%)',
-            data.confidence >= 0.75 ? 'ok' : 'info'
-          );
-        } else {
-          showTestResult('Kein Sprecher erkannt.', 'err');
-        }
-      } catch (e) {
-        showTestResult('Fehler: ' + e.message, 'err');
-      }
+        var res = await fetch(basePath + '/api/identify', { method: 'POST', body: formData });
+        var data = await res.json();
+        if (data.speaker) { showTestResult('Erkannt: <strong>' + esc(data.speaker) + '</strong> (Confidence: ' + (data.confidence * 100).toFixed(1) + '%)', data.confidence >= 0.75 ? 'ok' : 'info'); }
+        else { showTestResult('Kein Sprecher erkannt.', 'err'); }
+      } catch (e) { showTestResult('Fehler: ' + e.message, 'err'); }
     };
-    mediaRecorder.start();
-    testRecording = true;
+    mediaRecorder.start(); testRecording = true;
     document.getElementById('testRecordBtn').textContent = 'Stoppen';
     document.getElementById('testRecordBtn').classList.add('recording');
     showTestResult('Sprich jetzt...', 'info');
-  } catch (e) {
-    showTestResult('Mikrofon-Fehler: ' + e.message, 'err');
-  }
+  } catch (e) { showTestResult('Mikrofon-Fehler: ' + e.message, 'err'); }
+}
+function stopTestRecording() { if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop(); }
+function handleTestFileUpload(input) {
+  if (!input.files[0]) return;
+  var formData = new FormData();
+  formData.append('audio', input.files[0], input.files[0].name);
+  showTestResult('Analysiere...', 'info');
+  fetch(basePath + '/api/identify', { method: 'POST', body: formData }).then(function(r) { return r.json(); }).then(function(data) {
+    if (data.speaker) { showTestResult('Erkannt: <strong>' + esc(data.speaker) + '</strong> (Confidence: ' + (data.confidence * 100).toFixed(1) + '%)', data.confidence >= 0.75 ? 'ok' : 'info'); }
+    else { showTestResult('Kein Sprecher erkannt.', 'err'); }
+  }).catch(function(e) { showTestResult('Fehler: ' + e.message, 'err'); });
+  input.value = '';
 }
 
-function stopTestRecording() {
-  if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
-}
-
-// --- UI Helpers ---
-function showStatus(msg, type) {
-  const el = document.getElementById('statusBox');
-  el.className = 'status status-' + type;
-  el.innerHTML = msg;
-  el.classList.remove('hidden');
-}
-
-function showTestResult(msg, type) {
-  const el = document.getElementById('testResult');
-  el.className = 'status status-' + type;
-  el.innerHTML = msg;
-  el.classList.remove('hidden');
-}
+function showStatus(msg, type) { var el = document.getElementById('statusBox'); el.className = 'status status-' + type; el.innerHTML = msg; el.classList.remove('hidden'); }
+function showTestResult(msg, type) { var el = document.getElementById('testResult'); el.className = 'status status-' + type; el.innerHTML = msg; el.classList.remove('hidden'); }
 
 async function loadSpeakers() {
   try {
-    const res = await fetch(basePath + '/api/speakers');
-    const data = await res.json();
-    const list = document.getElementById('speakerList');
+    var res = await fetch(basePath + '/api/speakers');
+    var data = await res.json();
+    var container = document.getElementById('speakerList');
     if (!data.speakers || data.speakers.length === 0) {
-      list.innerHTML = '<li class="speaker-item" style="color:var(--muted)">Noch keine Sprecher registriert.</li>';
+      container.innerHTML = '<div class="card"><h2>Registrierte Sprecher</h2><p class="samples-info">Noch keine Sprecher registriert.</p></div>';
       return;
     }
-    list.innerHTML = data.speakers.map(s =>
-      '<li class="speaker-item"><div>' +
-      '<span class="speaker-name">' + esc(s.name) + '</span><br>' +
-      '<span class="speaker-id">' + esc(s.user_id) + '</span>' +
-      '</div><button class="btn-danger" onclick="deleteSpeaker(&quot;' + esc(s.user_id) + '&quot;)">Löschen</button></li>'
-    ).join('');
+    container.innerHTML = data.speakers.map(function(s) {
+      var sampleList = s.samples.map(function(f) {
+        return '<li style="display:flex;justify-content:space-between;align-items:center;padding:.3rem 0">' +
+          '<span style="font-size:.85rem;color:var(--muted)">' + esc(f) + '</span>' +
+          '<button class="btn-danger" style="font-size:.7rem;padding:.2rem .5rem" onclick="deleteSample(&quot;' + esc(s.name) + '&quot;, &quot;' + esc(f) + '&quot;)">X</button></li>';
+      }).join('');
+      var learnActive = (s.name === currentLearnSpeaker);
+      return '<div class="card">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center">' +
+        '<h2>' + esc(s.name) + (s.enrolled ? ' <span style="color:var(--ok);font-size:.8rem">aktiv</span>' : ' <span style="color:var(--highlight);font-size:.8rem">nicht trainiert</span>') + '</h2>' +
+        '<button class="btn-danger" onclick="deleteSpeaker(&quot;' + esc(s.name) + '&quot;)">Sprecher löschen</button></div>' +
+        '<ul style="list-style:none;margin:.5rem 0">' + sampleList + '</ul>' +
+        '<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.5rem">' +
+        '<p class="samples-info" style="flex:1">' + s.samples.length + ' Probe(n)</p>' +
+        '<button class="btn-primary" onclick="retrainSpeaker(&quot;' + esc(s.name) + '&quot;)">Profil trainieren</button>' +
+        '<button class="' + (learnActive ? 'btn-danger recording' : 'btn-secondary') + '" onclick="toggleLearnMode(&quot;' + esc(s.name) + '&quot;)">' + (learnActive ? 'Lernmodus stoppen' : 'Lernmodus (Satellite)') + '</button>' +
+        '</div></div>';
+    }).join('');
   } catch (e) {
-    document.getElementById('speakerList').innerHTML =
-      '<li class="speaker-item" style="color:#e74c3c">Fehler beim Laden</li>';
+    document.getElementById('speakerList').innerHTML = '<div class="card" style="color:#e74c3c">Fehler beim Laden</div>';
   }
 }
 
-async function deleteSpeaker(userId) {
-  if (!confirm('Sprecher wirklich löschen?')) return;
-  await fetch(basePath + '/api/speakers/' + userId, { method: 'DELETE' });
+var currentLearnSpeaker = null;
+
+async function retrainSpeaker(name) {
+  showStatus('Trainiere Profil...', 'info');
+  try {
+    var res = await fetch(basePath + '/api/speakers/' + encodeURIComponent(name) + '/retrain', { method: 'POST' });
+    var data = await res.json();
+    if (data.success) { showStatus(esc(name) + ': Profil neu berechnet (' + data.samples + ' Proben)', 'ok'); loadSpeakers(); }
+    else { showStatus('Fehler: ' + esc(data.error), 'err'); }
+  } catch (e) { showStatus('Fehler: ' + e.message, 'err'); }
+}
+
+async function toggleLearnMode(name) {
+  var newSpeaker = (currentLearnSpeaker === name) ? null : name;
+  try {
+    var res = await fetch(basePath + '/api/learn', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({speaker: newSpeaker}) });
+    var data = await res.json();
+    if (data.success) {
+      currentLearnSpeaker = newSpeaker;
+      loadSpeakers();
+      if (newSpeaker) { showStatus('Lernmodus aktiv: Sprich zum Satellite. Jede Spracheingabe wird als Probe fuer "' + esc(newSpeaker) + '" gespeichert.', 'ok'); }
+      else { showStatus('Lernmodus deaktiviert.', 'info'); }
+    }
+  } catch (e) { showStatus('Fehler: ' + e.message, 'err'); }
+}
+
+async function deleteSample(speaker, filename) {
+  if (!confirm('Probe löschen?')) return;
+  await fetch(basePath + '/api/speakers/' + encodeURIComponent(speaker) + '/samples/' + encodeURIComponent(filename), { method: 'DELETE' });
   loadSpeakers();
 }
 
-loadSpeakers();
+async function deleteSpeaker(name) {
+  if (!confirm('Sprecher und alle Proben löschen?')) return;
+  await fetch(basePath + '/api/speakers/' + encodeURIComponent(name), { method: 'DELETE' });
+  loadSpeakers();
+}
+
+// Load learn mode status, then speakers
+fetch(basePath + '/api/learn').then(function(r) { return r.json(); }).then(function(data) {
+  currentLearnSpeaker = data.speaker || null;
+  loadSpeakers();
+}).catch(function() { loadSpeakers(); });
 initUI();
 </script>
 </body>
@@ -426,7 +348,7 @@ initUI();
 def create_web_app(speaker_db: SpeakerDatabase) -> web.Application:
     """Create the aiohttp web application for enrollment."""
 
-    app = web.Application(client_max_size=50 * 1024 * 1024)  # 50MB max upload
+    app = web.Application(client_max_size=50 * 1024 * 1024)
 
     async def index(request):
         return web.Response(text=HTML_PAGE, content_type="text/html")
@@ -436,68 +358,82 @@ def create_web_app(speaker_db: SpeakerDatabase) -> web.Application:
         return web.json_response({"speakers": speakers})
 
     async def delete_speaker(request):
-        user_id = request.match_info["user_id"]
-        success = speaker_db.delete_speaker(user_id)
+        name = request.match_info["name"]
+        success = speaker_db.delete_speaker(name)
+        return web.json_response({"success": success})
+
+    async def delete_sample(request):
+        name = request.match_info["name"]
+        filename = request.match_info["filename"]
+        success = speaker_db.delete_sample(name, filename)
         return web.json_response({"success": success})
 
     async def enroll(request):
-        """Handle speaker enrollment with audio samples."""
+        """Save audio samples and compute speaker embedding."""
         try:
             reader = await request.multipart()
             name = None
-            user_id = None
-            audio_blobs = []
+            saved_files = []
 
             async for part in reader:
                 if part.name == "name":
-                    name = (await part.read()).decode("utf-8")
-                elif part.name == "user_id":
-                    user_id = (await part.read()).decode("utf-8")
+                    name = (await part.read()).decode("utf-8").strip()
                 elif part.name and part.name.startswith("sample_"):
                     data = await part.read()
-                    audio_blobs.append(data)
+                    filename = part.filename or (part.name + ".webm")
+                    if data and name:
+                        speaker_db.save_sample(name, data, filename)
+                        saved_files.append(filename)
 
             if not name:
                 return web.json_response({"success": False, "error": "Name fehlt"})
-            if user_id and not user_id.replace("-", "").replace("_", "").isalnum():
-                return web.json_response({"success": False, "error": "Ungültige User-ID"})
-            if not audio_blobs:
+            if not saved_files:
                 return web.json_response({"success": False, "error": "Keine Audiodaten"})
 
-            # Convert webm audio to numpy arrays using ffmpeg
-            audio_arrays = []
-            for blob_data in audio_blobs:
-                audio_array = await _convert_webm_to_numpy(blob_data)
-                if audio_array is not None and len(audio_array) > 0:
-                    audio_arrays.append(audio_array)
-
-            if not audio_arrays:
-                return web.json_response(
-                    {"success": False, "error": "Audiodaten konnten nicht verarbeitet werden"}
-                )
-
-            # Run enrollment in executor to avoid blocking
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(
-                None,
-                speaker_db.enroll_speaker,
-                name,
-                user_id,
-                audio_arrays,
-            )
-
-            return web.json_response({"success": True})
+            total = len(speaker_db._get_sample_files(speaker_db.profiles_dir / name))
+            return web.json_response({"success": True, "samples": total})
 
         except Exception as e:
             _LOGGER.exception("Enrollment failed")
             return web.json_response({"success": False, "error": str(e)})
+
+    async def retrain(request):
+        """Recompute embedding for a speaker from their current samples."""
+        name = request.match_info["name"]
+        try:
+            loop = asyncio.get_running_loop()
+            ok = await loop.run_in_executor(None, speaker_db.recompute_speaker, name)
+            if not ok:
+                return web.json_response({"success": False, "error": "Keine gültigen Proben"})
+            total = len(speaker_db._get_sample_files(speaker_db.profiles_dir / name))
+            return web.json_response({"success": True, "samples": total})
+        except Exception as e:
+            _LOGGER.exception("Retrain failed")
+            return web.json_response({"success": False, "error": str(e)})
+
+    async def learn_mode(request):
+        """Toggle learn mode — save pipeline audio as training samples."""
+        try:
+            data = await request.json()
+            speaker = data.get("speaker")
+            # Create folder if enabling for new speaker
+            if speaker:
+                (speaker_db.profiles_dir / speaker).mkdir(parents=True, exist_ok=True)
+            set_learn_mode(speaker)
+            return web.json_response({"success": True, "speaker": speaker})
+        except Exception as e:
+            _LOGGER.exception("Learn mode toggle failed")
+            return web.json_response({"success": False, "error": str(e)})
+
+    async def learn_status(request):
+        """Get current learn mode status."""
+        return web.json_response({"speaker": get_learn_mode()})
 
     async def identify(request):
         """Handle test identification."""
         try:
             reader = await request.multipart()
             audio_data = None
-
             async for part in reader:
                 if part.name == "audio":
                     audio_data = await part.read()
@@ -505,43 +441,39 @@ def create_web_app(speaker_db: SpeakerDatabase) -> web.Application:
             if not audio_data:
                 return web.json_response({"speaker": None, "confidence": 0})
 
-            audio_array = await _convert_webm_to_numpy(audio_data)
+            audio_array = await _convert_audio_to_numpy(audio_data)
             if audio_array is None:
                 return web.json_response({"speaker": None, "confidence": 0})
 
             loop = asyncio.get_running_loop()
             name, user_id, confidence = await loop.run_in_executor(
-                None,
-                speaker_db.identify_speaker,
-                audio_array,
-                16000,
+                None, speaker_db.identify_speaker, audio_array, 16000,
             )
-
             return web.json_response({
-                "speaker": name,
-                "user_id": user_id,
+                "speaker": name, "user_id": user_id,
                 "confidence": round(confidence, 4),
             })
-
         except Exception as e:
             _LOGGER.exception("Identification test failed")
             return web.json_response({"speaker": None, "confidence": 0, "error": str(e)})
 
-    # Register routes at root and under /speaker-id for reverse proxy support
     for prefix in ["", "/speaker-id"]:
         app.router.add_get(prefix + "/", index)
         app.router.add_get(prefix + "/api/speakers", list_speakers)
-        app.router.add_delete(prefix + "/api/speakers/{user_id}", delete_speaker)
+        app.router.add_delete(prefix + "/api/speakers/{name}", delete_speaker)
+        app.router.add_delete(prefix + "/api/speakers/{name}/samples/{filename}", delete_sample)
+        app.router.add_post(prefix + "/api/speakers/{name}/retrain", retrain)
         app.router.add_post(prefix + "/api/enroll", enroll)
         app.router.add_post(prefix + "/api/identify", identify)
-    # Redirect /speaker-id (no trailing slash) to /speaker-id/
+        app.router.add_post(prefix + "/api/learn", learn_mode)
+        app.router.add_get(prefix + "/api/learn", learn_status)
     app.router.add_get("/speaker-id", lambda r: web.HTTPFound("/speaker-id/"))
 
     return app
 
 
-async def _convert_webm_to_numpy(webm_data: bytes) -> np.ndarray | None:
-    """Convert webm/opus audio to 16kHz mono int16 numpy array using ffmpeg."""
+async def _convert_audio_to_numpy(audio_data: bytes) -> np.ndarray | None:
+    """Convert audio bytes to 16kHz mono float32 numpy array via ffmpeg."""
     try:
         proc = await asyncio.create_subprocess_exec(
             "ffmpeg", "-i", "pipe:0",
@@ -551,15 +483,12 @@ async def _convert_webm_to_numpy(webm_data: bytes) -> np.ndarray | None:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await proc.communicate(input=webm_data)
-
+        stdout, stderr = await proc.communicate(input=audio_data)
         if proc.returncode != 0:
             _LOGGER.error("ffmpeg error: %s", stderr.decode(errors="replace")[-500:])
             return None
-
         raw = np.frombuffer(stdout, dtype=np.int16)
         return raw.astype(np.float32) / 32768.0
-
     except Exception as e:
         _LOGGER.error("Audio conversion failed: %s", e)
         return None

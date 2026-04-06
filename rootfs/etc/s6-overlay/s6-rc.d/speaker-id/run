@@ -24,7 +24,7 @@ args+=(--stt-provider "${stt_provider}")
 args+=(--similarity-threshold "${similarity_threshold}")
 args+=(--unknown-label "${unknown_label}")
 args+=(--language "${language}")
-args+=(--profiles-dir "/data/profiles")
+args+=(--profiles-dir "/share/wyoming-speaker-id/profiles")
 
 # Provider-specific config
 if [ "${stt_provider}" = "openai" ]; then
