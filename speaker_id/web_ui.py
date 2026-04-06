@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 from aiohttp import web
 
-from .handler import set_learn_mode, get_learn_mode
+from .handler import set_learn_mode, get_learn_mode, set_save_unknown, get_save_unknown
 from .speaker_db import SpeakerDatabase
 
 _LOGGER = logging.getLogger(__name__)
@@ -128,6 +128,28 @@ HTML_PAGE = """<!DOCTYPE html>
     <input type="file" id="testFileInput" accept="audio/*" onchange="handleTestFileUpload(this)">
   </div>
   <div id="testResult" class="hidden"></div>
+</div>
+
+<!-- Settings -->
+<div class="card">
+  <h2>Einstellungen</h2>
+  <label for="settingThreshold">Erkennungsschwelle (0.0 - 1.0)</label>
+  <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:1rem">
+    <input type="range" id="settingThresholdRange" min="0.3" max="0.95" step="0.01" style="flex:1" oninput="document.getElementById('settingThreshold').value=this.value">
+    <input type="number" id="settingThreshold" min="0.3" max="0.95" step="0.01" style="width:5rem;padding:.4rem;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text)" oninput="document.getElementById('settingThresholdRange').value=this.value">
+  </div>
+  <p class="samples-info" style="margin-bottom:1rem">Niedriger = mehr Treffer (mehr falsch-positiv). Höher = strenger (mehr unerkannt). Standard: 0.75</p>
+
+  <label for="settingUnknown">Label für unbekannte Sprecher</label>
+  <input type="text" id="settingUnknown" placeholder="Unbekannt" style="margin-bottom:1rem">
+
+  <label>Nicht erkannte Aufnahmen speichern</label>
+  <div style="margin-bottom:1rem">
+    <label style="display:inline;cursor:pointer"><input type="checkbox" id="settingSaveUnknown" style="margin-right:.3rem">Pipeline-Audio bei unerkannten Sprechern speichern</label>
+  </div>
+
+  <button class="btn-primary" onclick="saveSettings()">Einstellungen speichern</button>
+  <div id="settingsStatus" class="hidden"></div>
 </div>
 
 <script>
@@ -273,10 +295,16 @@ async function loadSpeakers() {
       container.innerHTML = '<div class="card"><h2>Registrierte Sprecher</h2><p class="samples-info">Noch keine Sprecher registriert.</p></div>';
       return;
     }
-    container.innerHTML = data.speakers.map(function(s) {
+    // Separate _unknown from real speakers
+    var speakers = data.speakers.filter(function(s) { return s.name !== '_unknown'; });
+    var unknown = data.speakers.find(function(s) { return s.name === '_unknown'; });
+    var speakerNames = speakers.map(function(s) { return s.name; });
+
+    var html = speakers.map(function(s) {
       var sampleList = s.samples.map(function(f) {
-        return '<li style="display:flex;justify-content:space-between;align-items:center;padding:.3rem 0">' +
-          '<span style="font-size:.85rem;color:var(--muted)">' + esc(f) + '</span>' +
+        return '<li style="display:flex;justify-content:space-between;align-items:center;padding:.3rem 0;gap:.5rem">' +
+          '<audio controls preload="none" style="height:28px;flex-shrink:0" src="' + basePath + '/api/audio/' + encodeURIComponent(s.name) + '/' + encodeURIComponent(f) + '"></audio>' +
+          '<span style="font-size:.85rem;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis">' + esc(f) + '</span>' +
           '<button class="btn-danger" style="font-size:.7rem;padding:.2rem .5rem" onclick="deleteSample(&quot;' + esc(s.name) + '&quot;, &quot;' + esc(f) + '&quot;)">X</button></li>';
       }).join('');
       var learnActive = (s.name === currentLearnSpeaker);
@@ -291,9 +319,43 @@ async function loadSpeakers() {
         '<button class="' + (learnActive ? 'btn-danger recording' : 'btn-secondary') + '" onclick="toggleLearnMode(&quot;' + esc(s.name) + '&quot;)">' + (learnActive ? 'Lernmodus stoppen' : 'Lernmodus (Satellite)') + '</button>' +
         '</div></div>';
     }).join('');
+
+    // Unknown samples section
+    if (unknown && unknown.samples.length > 0) {
+      var assignOptions = '<option value="">Zuweisen an...</option>' + speakerNames.map(function(n) {
+        return '<option value="' + esc(n) + '">' + esc(n) + '</option>';
+      }).join('');
+      var unknownList = unknown.samples.map(function(f) {
+        return '<li style="display:flex;justify-content:space-between;align-items:center;padding:.4rem 0;gap:.5rem">' +
+          '<audio controls preload="none" style="height:28px;flex-shrink:0" src="' + basePath + '/api/audio/_unknown/' + encodeURIComponent(f) + '"></audio>' +
+          '<span style="font-size:.85rem;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis">' + esc(f) + '</span>' +
+          '<select onchange="assignSample(&quot;' + esc(f) + '&quot;, this.value)" style="padding:.3rem;border-radius:4px;background:var(--bg);color:var(--text);border:1px solid var(--border)">' + assignOptions + '</select>' +
+          '<button class="btn-danger" style="font-size:.7rem;padding:.2rem .5rem" onclick="deleteSample(&quot;_unknown&quot;, &quot;' + esc(f) + '&quot;)">X</button></li>';
+      }).join('');
+      html += '<div class="card" style="border-color:var(--highlight)">' +
+        '<h2>Nicht erkannte Aufnahmen <span style="color:var(--highlight);font-size:.8rem">' + unknown.samples.length + ' Probe(n)</span></h2>' +
+        '<p class="samples-info">Anhören und einem Sprecher zuweisen, oder löschen.</p>' +
+        '<ul style="list-style:none;margin:.5rem 0">' + unknownList + '</ul></div>';
+    }
+
+    container.innerHTML = html;
   } catch (e) {
     document.getElementById('speakerList').innerHTML = '<div class="card" style="color:#e74c3c">Fehler beim Laden</div>';
   }
+}
+
+async function assignSample(filename, toSpeaker) {
+  if (!toSpeaker) return;
+  try {
+    var res = await fetch(basePath + '/api/move', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({from: '_unknown', filename: filename, to: toSpeaker})
+    });
+    var data = await res.json();
+    if (data.success) { loadSpeakers(); showStatus('Probe verschoben nach ' + esc(toSpeaker), 'ok'); }
+    else { showStatus('Fehler: ' + esc(data.error), 'err'); }
+  } catch (e) { showStatus('Fehler: ' + e.message, 'err'); }
 }
 
 var currentLearnSpeaker = null;
@@ -334,11 +396,41 @@ async function deleteSpeaker(name) {
   loadSpeakers();
 }
 
+// --- Settings ---
+async function loadSettings() {
+  try {
+    var res = await fetch(basePath + '/api/settings');
+    var data = await res.json();
+    document.getElementById('settingThreshold').value = data.similarity_threshold;
+    document.getElementById('settingThresholdRange').value = data.similarity_threshold;
+    document.getElementById('settingUnknown').value = data.unknown_label;
+    document.getElementById('settingSaveUnknown').checked = data.save_unknown;
+  } catch (e) {}
+}
+async function saveSettings() {
+  var el = document.getElementById('settingsStatus');
+  try {
+    var res = await fetch(basePath + '/api/settings', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        similarity_threshold: parseFloat(document.getElementById('settingThreshold').value),
+        unknown_label: document.getElementById('settingUnknown').value.trim(),
+        save_unknown: document.getElementById('settingSaveUnknown').checked
+      })
+    });
+    var data = await res.json();
+    if (data.success) { el.className = 'status status-ok'; el.innerHTML = 'Gespeichert!'; el.classList.remove('hidden'); }
+    else { el.className = 'status status-err'; el.innerHTML = 'Fehler: ' + esc(data.error); el.classList.remove('hidden'); }
+  } catch (e) { el.className = 'status status-err'; el.innerHTML = 'Fehler: ' + e.message; el.classList.remove('hidden'); }
+}
+
 // Load learn mode status, then speakers
 fetch(basePath + '/api/learn').then(function(r) { return r.json(); }).then(function(data) {
   currentLearnSpeaker = data.speaker || null;
   loadSpeakers();
 }).catch(function() { loadSpeakers(); });
+loadSettings();
 initUI();
 </script>
 </body>
@@ -429,6 +521,53 @@ def create_web_app(speaker_db: SpeakerDatabase) -> web.Application:
         """Get current learn mode status."""
         return web.json_response({"speaker": get_learn_mode()})
 
+    async def move_sample(request):
+        """Move a sample from one speaker to another."""
+        try:
+            data = await request.json()
+            from_speaker = data.get("from")
+            filename = data.get("filename")
+            to_speaker = data.get("to")
+            if not all([from_speaker, filename, to_speaker]):
+                return web.json_response({"success": False, "error": "Missing fields"})
+            ok = speaker_db.move_sample(from_speaker, filename, to_speaker)
+            return web.json_response({"success": ok})
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
+    async def serve_audio(request):
+        """Serve an audio file for playback."""
+        name = request.match_info["name"]
+        filename = request.match_info["filename"]
+        filepath = speaker_db.profiles_dir / name / filename
+        if not filepath.exists():
+            return web.Response(status=404)
+        return web.FileResponse(filepath)
+
+    async def get_settings(request):
+        return web.json_response({
+            "similarity_threshold": speaker_db.similarity_threshold,
+            "unknown_label": speaker_db.unknown_label,
+            "save_unknown": get_save_unknown(),
+        })
+
+    async def post_settings(request):
+        try:
+            data = await request.json()
+            if "similarity_threshold" in data:
+                val = float(data["similarity_threshold"])
+                if 0.1 <= val <= 1.0:
+                    speaker_db.similarity_threshold = val
+            if "unknown_label" in data:
+                speaker_db.unknown_label = data["unknown_label"] or "Unbekannt"
+            if "save_unknown" in data:
+                set_save_unknown(bool(data["save_unknown"]))
+            _LOGGER.info("Settings updated: threshold=%.2f, unknown=%s, save_unknown=%s",
+                         speaker_db.similarity_threshold, speaker_db.unknown_label, get_save_unknown())
+            return web.json_response({"success": True})
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
     async def identify(request):
         """Handle test identification."""
         try:
@@ -467,6 +606,10 @@ def create_web_app(speaker_db: SpeakerDatabase) -> web.Application:
         app.router.add_post(prefix + "/api/identify", identify)
         app.router.add_post(prefix + "/api/learn", learn_mode)
         app.router.add_get(prefix + "/api/learn", learn_status)
+        app.router.add_post(prefix + "/api/move", move_sample)
+        app.router.add_get(prefix + "/api/audio/{name}/{filename}", serve_audio)
+        app.router.add_get(prefix + "/api/settings", get_settings)
+        app.router.add_post(prefix + "/api/settings", post_settings)
     app.router.add_get("/speaker-id", lambda r: web.HTTPFound("/speaker-id/"))
 
     return app

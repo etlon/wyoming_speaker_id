@@ -16,8 +16,9 @@ from .stt_backends import STTBackend
 _LOGGER = logging.getLogger(__name__)
 
 
-# Module-level learn mode state (shared across handler instances)
+# Module-level state (shared across handler instances)
 _learn_mode_speaker: str | None = None
+_save_unknown: bool = True
 
 
 def set_learn_mode(speaker_name: str | None):
@@ -29,6 +30,15 @@ def set_learn_mode(speaker_name: str | None):
 
 def get_learn_mode() -> str | None:
     return _learn_mode_speaker
+
+
+def set_save_unknown(enabled: bool):
+    global _save_unknown
+    _save_unknown = enabled
+
+
+def get_save_unknown() -> bool:
+    return _save_unknown
 
 
 class SpeakerIdHandler(AsyncEventHandler):
@@ -114,6 +124,14 @@ class SpeakerIdHandler(AsyncEventHandler):
             )
 
             speaker_name, user_id, confidence = speaker_result
+
+            # Save unrecognized audio to _unknown/ for later assignment
+            if user_id is None and duration >= 1.0 and not _learn_mode_speaker and _save_unknown:
+                import time
+                filename = f"unknown_{int(time.time())}.wav"
+                wav_data = self._pcm_to_wav(audio_bytes)
+                self.speaker_db.save_sample("_unknown", wav_data, filename)
+                _LOGGER.info("Saved unrecognized audio (%.2f confidence) as %s", confidence, filename)
 
             # Build enriched transcript
             if transcript_text:

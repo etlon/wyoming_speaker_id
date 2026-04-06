@@ -154,7 +154,7 @@ class SpeakerDatabase:
         """Scan profiles directory and load/recompute all speaker embeddings."""
         self.profiles.clear()
         for speaker_dir in sorted(self.profiles_dir.iterdir()):
-            if not speaker_dir.is_dir() or speaker_dir.name.startswith("."):
+            if not speaker_dir.is_dir() or speaker_dir.name.startswith(".") or speaker_dir.name.startswith("_"):
                 continue
 
             name = speaker_dir.name
@@ -206,6 +206,24 @@ class SpeakerDatabase:
         _LOGGER.info("Deleted sample: %s/%s", speaker_name, filename)
         return True
 
+    def move_sample(self, from_speaker: str, filename: str, to_speaker: str) -> bool:
+        """Move a sample from one speaker to another."""
+        import shutil
+        src = self.profiles_dir / from_speaker / filename
+        if not src.exists() or src.suffix.lower() not in AUDIO_EXTENSIONS:
+            return False
+        dest_dir = self.profiles_dir / to_speaker
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / filename
+        shutil.move(str(src), str(dest))
+        # Invalidate caches
+        for d in [self.profiles_dir / from_speaker, dest_dir]:
+            cache = d / EMBEDDING_CACHE
+            if cache.exists():
+                cache.unlink()
+        _LOGGER.info("Moved sample: %s/%s -> %s/%s", from_speaker, filename, to_speaker, filename)
+        return True
+
     def recompute_speaker(self, speaker_name: str) -> bool:
         """Recompute embedding for a speaker from their current samples."""
         speaker_dir = self.profiles_dir / speaker_name
@@ -243,7 +261,7 @@ class SpeakerDatabase:
         return True
 
     def list_speakers(self) -> list[dict]:
-        """List all speakers with their samples."""
+        """List all speakers (and _unknown) with their samples."""
         result = []
         for speaker_dir in sorted(self.profiles_dir.iterdir()):
             if not speaker_dir.is_dir() or speaker_dir.name.startswith("."):
