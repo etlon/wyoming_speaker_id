@@ -17,132 +17,142 @@ Two servers run concurrently:
 
 Speaker ID and STT execute in parallel via `asyncio.gather()` — zero additional latency. STT is called on **every** voice command (not just enrollment).
 
+## Integration with hassio_assist_memory
+
+The `[Speaker:Name]` tag is the contract between this project and [hassio_assist_memory](../hassio_assist_memory/). The flow:
+
+1. **Speaker ID** identifies voice → `[Speaker:Cedric] Mach das Licht aus`
+2. **Assist Memory** parses the tag via regex `^\[Speaker:(\w+)\]\s*(.+)$` in `event_listener.py`
+3. Memories get scoped: `personal` (per speaker) or `household` (shared)
+4. Conversation agent prompt gets injected with speaker-grouped memories
+5. LLM responds with personalized context
+
+No code changes needed on either side — the tag format is already implemented in both projects.
+
+## Speaker Profiles (Folder-Based)
+
+```
+/share/wyoming-speaker-id/profiles/
+├── cedric/
+│   ├── sample1.webm
+│   ├── pipeline_1717234567.wav    ← captured via learn mode
+│   ├── recording_from_phone.mp3
+│   └── .embedding.json            ← auto-computed cache
+├── lovis/
+│   └── ...
+└── _unknown/                      ← unrecognized voices saved here
+    ├── unknown_1717234600.wav
+    └── unknown_1717234650.wav
+```
+
+- Each speaker = a folder. Name = folder name.
+- Audio files in any format (wav, mp3, webm, ogg, flac, m4a, opus) are the voice samples.
+- `.embedding.json` is a cache, auto-regenerated when samples change.
+- `_unknown/` holds unrecognized audio for later review and assignment.
+- Profiles stored in `/share/` — survives add-on reinstalls.
+- You can add/remove files directly via filesystem (Samba/SSH) — restart or retrain to pick up changes.
+
 ## Project Structure
 
 ```
 speaker_id/
   __main__.py      # Entry point: arg parsing, init, runs Wyoming server + web UI
-  handler.py       # SpeakerIdHandler(AsyncEventHandler): collects audio, parallel ID+STT, returns enriched Transcript
-  speaker_db.py    # SpeakerDatabase: enroll/identify/delete speakers, Resemblyzer embeddings, cosine similarity
-  stt_backends.py  # STTBackend ABC → OpenAISTT, GoogleSTT, WyomingSTT implementations
-  web_ui.py        # aiohttp routes + embedded HTML/JS enrollment UI (German, dark theme)
+  handler.py       # SpeakerIdHandler(AsyncEventHandler): audio collection, parallel ID+STT, learn mode, unknown capture
+  speaker_db.py    # Folder-based profiles: scan, compute embeddings, cache, CRUD, move, rename
+  stt_backends.py  # STTBackend ABC → OpenAISTT, GoogleSTT, WyomingSTT
+  web_ui.py        # aiohttp routes + embedded HTML/JS UI (Syne/JetBrains Mono, warm studio theme)
 ```
 
 Supporting files:
-- `config.yaml` — HA add-on manifest (options, ports, arch). Must have `init: false` for s6-overlay.
-- `build.yaml` — multi-arch build config (aarch64, amd64), base image `ghcr.io/home-assistant/{arch}-base-debian:bookworm`
-- `Dockerfile` — Debian-based, installs resemblyzer + deps, pre-downloads encoder model
-- `rootfs/etc/s6-overlay/s6-rc.d/speaker-id/` — s6 service config (type, run, dependencies.d/base)
-- `rootfs/etc/s6-overlay/s6-rc.d/user/contents.d/speaker-id` — registers service with s6
+- `config.yaml` — HA add-on manifest. Must have `init: false` for s6-overlay.
+- `build.yaml` — multi-arch build, base image `ghcr.io/home-assistant/{arch}-base-debian:bookworm`
+- `Dockerfile` — Debian-based, CPU-only PyTorch in separate RUN step
+- `rootfs/etc/s6-overlay/s6-rc.d/speaker-id/` — s6 service config
 
 ## Critical Build/Deploy Knowledge
 
 ### Base Image: Debian, NOT Alpine
-Alpine (`ghcr.io/hassio-addons/base`) fails with exit code 79/99 on `apk add` due to dependency resolution issues with the large package set. Use Debian (`ghcr.io/home-assistant/{arch}-base-debian:bookworm`) — same as official HA add-ons (Whisper, Piper).
+Alpine (`ghcr.io/hassio-addons/base`) fails with exit code 79/99 on `apk add`. Use Debian (`ghcr.io/home-assistant/{arch}-base-debian:bookworm`) — same as official HA add-ons.
 
 ### PyTorch: CPU-only, installed separately
-PyTorch must be installed in its own `RUN` step with `--index-url https://download.pytorch.org/whl/cpu`. The `--index-url` flag does NOT work as a per-requirement option in requirements.txt — it's a global pip flag only. Without CPU-only, pip pulls ~2GB of CUDA/nvidia packages that fill up HA storage.
+Must be its own `RUN` step with `--index-url https://download.pytorch.org/whl/cpu`. The `--index-url` flag does NOT work as a per-requirement option in requirements.txt. Without CPU-only, pip pulls ~2GB of CUDA packages.
 
 ### s6-overlay
-- `init: false` is **required** in `config.yaml` — without it, HA supervisor injects Docker's tini as PID 1, and s6-overlay crashes with "can only run as pid 1"
-- `ENTRYPOINT ["/init"]` in Dockerfile ensures s6-overlay starts correctly
-- s6 config files (`type`, `dependencies.d/base`, `contents.d/speaker-id`) must be in `rootfs/`, not created via `RUN` commands
-- All rootfs files need CRLF→LF conversion (Windows dev environment): `find /etc/s6-overlay -type f -exec sed -i 's/\r$//' {} +`
+- `init: false` **required** in `config.yaml` — without it, s6-overlay crashes "can only run as pid 1"
+- `ENTRYPOINT ["/init"]` in Dockerfile
+- s6 config files must be in `rootfs/`, not created via `RUN` commands
+- CRLF→LF conversion needed (Windows dev): `find /etc/s6-overlay -type f -exec sed -i 's/\r$//' {} +`
 - Run script must be `chmod +x`
 
 ### Wyoming 1.5.4 API
-- `AsyncServer.from_uri(uri)` takes ONLY the URI — no `handler_factory` parameter
-- Handler factory is passed to `server.run(handler_factory)`, not `from_uri()`
-- `AsrProgram` and `AsrModel` both require a `version` argument (positional dataclass field)
+- `AsyncServer.from_uri(uri)` — NO `handler_factory` parameter
+- Handler factory passed to `server.run(handler_factory)`
+- `AsrProgram` and `AsrModel` both require `version` argument
 - `create_server()` returns `(server, handler_factory)` tuple
 
 ## Key Patterns
 
 - **Factory functions**: `create_server()`, `create_stt_backend()`, `create_web_app()`
 - **ABC for backends**: `STTBackend` with `async transcribe()` method
-- **Lazy encoder loading**: global `_encoder` + `_get_encoder()` in `speaker_db.py`. Pre-loaded via `_get_encoder()` in `__main__.py` to populate the cache (don't create a standalone VoiceEncoder).
-- **Executor offload**: CPU-bound work (embedding, audio conversion) runs via `asyncio.get_running_loop().run_in_executor()` (NOT deprecated `get_event_loop()`)
-- **Graceful degradation**: failures return empty strings or unknown_label, never crash the service
-- **Embedded UI**: HTML/CSS/JS is a single `"""triple-quoted"""` string `HTML_PAGE` in `web_ui.py`
+- **Lazy encoder loading**: `_get_encoder()` in `speaker_db.py`, pre-loaded in `__main__.py`
+- **Executor offload**: CPU-bound work via `asyncio.get_running_loop().run_in_executor()`
+- **Module-level state**: `_learn_mode_speaker`, `_save_unknown` in `handler.py` (shared across handler instances)
+- **Embedded UI**: HTML/CSS/JS as `"""triple-quoted"""` string in `web_ui.py`
 
-## Code Style
+## Web UI Features
 
-- Python 3.11 in container (Debian bookworm)
-- Type hints throughout
-- snake_case functions/variables, PascalCase classes
-- Module-level `_LOGGER = logging.getLogger(__name__)`
-- German language in UI strings and user-facing labels (unknown_label default: "Unbekannt")
+- Speaker cards with audio playback, inline rename (click filename), delete per sample
+- Learn mode — captures pipeline audio from satellite as training samples
+- Unknown voice section — listen, assign to speaker via dropdown, or delete
+- File upload (multiple files) + mic recording
+- Separate save (just store files) and train (compute embedding) actions
+- Settings: threshold slider, unknown label, toggle unknown capture
+- Backup download (.zip) and import
+- Reverse proxy support (`/speaker-id/` prefix, `basePath` auto-detection)
 
-## Web UI Gotchas
-
-### Python string escaping in HTML_PAGE
-The HTML/JS is a Python `"""triple-double-quoted"""` string. Python still processes escape sequences inside it:
-- `\'` becomes `'` — **breaks JS string quoting**. Use `&quot;` HTML entities for quotes in onclick handlers.
-- `\/` is not a recognized escape but triggers DeprecationWarning. Use `.endsWith('/')` instead of regex with `\/`.
-- Template literals with backticks work fine in `"""` strings.
-
-### HTTPS required for microphone
-`navigator.mediaDevices.getUserMedia` requires a secure context (HTTPS or localhost). The UI auto-detects this and falls back to file upload over HTTP. For mic recording, proxy through NPM with HTTPS.
-
-### Reverse proxy support
-- Routes registered at both `/` and `/speaker-id/` prefixes
-- All `fetch()` calls use `basePath` (auto-detected from `window.location.pathname`)
+### Web UI Gotchas
+- Python `"""` strings still process escapes: `\'` → `'` breaks JS. Use `&quot;` HTML entities.
+- HTTPS required for mic (getUserMedia). Falls back to file upload over HTTP.
 - NPM custom location: `/speaker-id` → `http://192.168.2.28:8756`
-
-### Security
-- `esc()` helper sanitizes all user data before innerHTML injection (XSS prevention)
-- `user_id` validated as alphanumeric + hyphens/underscores (path traversal prevention)
-- ffmpeg uses `create_subprocess_exec` with stdin pipe (no command injection)
-- Google API key sent via `x-goog-api-key` header, not URL query string
 
 ## Audio Processing
 
-- Web UI records webm/opus via MediaRecorder → converted to 16kHz mono PCM via ffmpeg subprocess
-- `_convert_webm_to_numpy()` returns **float32 normalized to [-1, 1]** (not int16) — required by Resemblyzer
-- Handler receives int16 PCM from Wyoming protocol and passes raw bytes to speaker_db
+- Web UI: webm/opus → ffmpeg → 16kHz mono float32 [-1, 1]
+- speaker_db: any audio format → ffmpeg subprocess → 16kHz mono float32
+- Handler: int16 PCM from Wyoming → raw bytes to speaker_db (converts internally)
+- Pipeline capture (learn mode / unknown): raw PCM wrapped in WAV header
 
-## STT Backends
+## API Endpoints
 
-| Backend | API | Key Config |
-|---------|-----|------------|
-| `openai` | `POST /v1/audio/transcriptions` (Whisper) | `--openai-api-key`, `--openai-model whisper-1` |
-| `google` | `POST /v1/speech:recognize` (Cloud STT) | `--google-api-key`, `--google-model latest_long` |
-| `wyoming` | Upstream Wyoming TCP protocol | `--upstream-host core-whisper`, `--upstream-port 10300` |
-
-OpenAI/Google are billed per API call (~$0.006/min). Use `wyoming` backend with local Whisper add-on for free local processing.
-
-## Speaker Recognition
-
-- **Library**: Resemblyzer 0.1.3 (GE2E, 256-dim embeddings)
-- **Enrollment**: 3 audio samples → averaged + normalized embedding → saved as JSON in `/data/profiles/`
-- **Identification**: cosine similarity (dot product of unit vectors) against all profiles
-- **Threshold**: 0.75 default (`--similarity-threshold`)
-- **Audio constraints**: enrollment samples must be >=0.1s, identification requires >=0.5s
-- **Sample rate**: 16kHz mono expected throughout
-
-## Dependencies
-
-- `wyoming==1.5.4` — Wyoming protocol
-- `resemblyzer==0.1.3` — speaker embeddings
-- `torch` (CPU-only) — required by resemblyzer, installed separately
-- `aiohttp==3.10.11` — async HTTP
-- `numpy>=1.24.0`, `librosa==0.10.2`, `soundfile==0.12.1` — audio processing
-- `ffmpeg` — system dependency for webm→PCM conversion
-
-## Configuration
-
-All CLI args mirror `config.yaml` options. The s6 run script reads HA config via bashio and maps to CLI args. Key defaults:
-- Wyoming port: 10310, Web UI port: 8756
-- Profiles dir: `/data/profiles`
-- Language: `de`
-- Debug: off
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/speakers` | GET | List speakers with samples |
+| `/api/speakers/{name}` | DELETE | Delete speaker + all samples |
+| `/api/speakers/{name}/retrain` | POST | Recompute embedding |
+| `/api/speakers/{name}/samples/{file}` | DELETE | Delete single sample |
+| `/api/speakers/{name}/samples/{file}/rename` | POST | Rename sample (JSON: `{new_name}`) |
+| `/api/enroll` | POST | Upload samples (multipart: name + files) |
+| `/api/identify` | POST | Test identification (multipart: audio) |
+| `/api/audio/{name}/{file}` | GET | Serve audio file for playback |
+| `/api/move` | POST | Move sample between speakers (JSON: `{from, filename, to}`) |
+| `/api/learn` | GET/POST | Get/set learn mode (JSON: `{speaker}` or null) |
+| `/api/settings` | GET/POST | Get/set threshold, unknown_label, save_unknown |
+| `/api/backup` | GET | Download all profiles as .zip |
+| `/api/backup` | POST | Import .zip backup (multipart) |
 
 ## Deployment
 
-- **Target**: Home Assistant OS (hassio) on x86_64 or aarch64
+- **Target**: Home Assistant OS on x86_64 or aarch64
 - **Current hardware**: HA at 192.168.2.28, NPM at ha.home (HTTPS)
 - **Current STT provider**: OpenAI Whisper
-- Persistent data in `/data/` survives rebuilds (profiles, enrollment audio)
+- **Profiles dir**: `/share/wyoming-speaker-id/profiles/` (persistent across reinstalls)
+- **Deploy method**: Copy files to `\\192.168.2.28\addons\wyoming_speaker_id\`, reload add-on store, install/rebuild
+- **Git**: `git@github.com:etlon/wyoming_speaker_id.git`
 - Pre-downloads Resemblyzer encoder model at Docker build time
-- The `[Speaker:Name]` tag in transcript text is a workaround — HA has no native speech-processor API yet
-- HA integration: Settings → Devices & Services → Wyoming Protocol → add host/port of the add-on container
+- `[Speaker:Name]` tag in transcript is a workaround — HA has no native speech-processor API yet
+
+## Similar Projects
+
+- [VoiceBM](https://github.com/cybericebyte/VoiceBM) — MQTT-based, uses Sherpa-ONNX (faster)
+- [speaker-recognition](https://github.com/EuleMitKeule/speaker-recognition) — HA custom integration, also Resemblyzer
+- [wyoming_speaker_recognition](https://github.com/mitrokun/wyoming_speaker_recognition) — Wyoming proxy approach
