@@ -206,6 +206,24 @@ class SpeakerDatabase:
         _LOGGER.info("Deleted sample: %s/%s", speaker_name, filename)
         return True
 
+    def rename_sample(self, speaker_name: str, old_filename: str, new_filename: str) -> bool:
+        """Rename an audio sample file."""
+        old_path = self.profiles_dir / speaker_name / old_filename
+        if not old_path.exists() or old_path.suffix.lower() not in AUDIO_EXTENSIONS:
+            return False
+        # Preserve original extension if new name doesn't have one
+        new_path = self.profiles_dir / speaker_name / new_filename
+        if new_path.suffix.lower() not in AUDIO_EXTENSIONS:
+            new_path = new_path.with_suffix(old_path.suffix)
+        if new_path.exists():
+            return False
+        old_path.rename(new_path)
+        cache = self.profiles_dir / speaker_name / EMBEDDING_CACHE
+        if cache.exists():
+            cache.unlink()
+        _LOGGER.info("Renamed sample: %s/%s -> %s", speaker_name, old_filename, new_path.name)
+        return True
+
     def move_sample(self, from_speaker: str, filename: str, to_speaker: str) -> bool:
         """Move a sample from one speaker to another."""
         import shutil

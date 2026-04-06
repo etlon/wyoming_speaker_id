@@ -23,415 +23,247 @@ HTML_PAGE = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Speaker ID — Sprecher verwalten</title>
+<title>Speaker ID</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  :root { --bg: #1a1a2e; --card: #16213e; --accent: #0f3460; --highlight: #e94560;
-          --text: #eee; --muted: #888; --ok: #4ecca3; --border: #2a2a4a; }
+  :root {
+    --bg: #0c0b0e; --surface: #16151a; --surface2: #1e1d23;
+    --amber: #c8956c; --amber-dim: rgba(200,149,108,.12); --amber-glow: rgba(200,149,108,.25);
+    --red: #bf4a3c; --red-dim: rgba(191,74,60,.12);
+    --green: #6ab87a; --green-dim: rgba(106,184,122,.12);
+    --text: #d8d2c8; --text-dim: #7a756d; --text-bright: #f0ece4;
+    --border: #2a2830; --border-light: #3a3840;
+  }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-         background: var(--bg); color: var(--text); padding: 1.5rem; max-width: 800px; margin: 0 auto; }
-  h1 { margin-bottom: 1.5rem; font-size: 1.5rem; }
-  h2 { font-size: 1.1rem; margin-bottom: 1rem; color: var(--muted); }
+  body {
+    font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text);
+    padding: 2rem 1.5rem; max-width: 860px; margin: 0 auto;
+    background-image: url("data:image/svg+xml,%3Csvg width='40' height='40' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='.65' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.03'/%3E%3C/svg%3E");
+  }
 
-  .card { background: var(--card); border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem;
-          border: 1px solid var(--border); }
+  /* Typography */
+  h1 { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.6rem; letter-spacing: -.02em;
+       color: var(--text-bright); margin-bottom: .3rem; }
+  h1 span { color: var(--amber); }
+  .subtitle { font-size: .8rem; color: var(--text-dim); letter-spacing: .08em; text-transform: uppercase;
+              font-family: 'JetBrains Mono', monospace; margin-bottom: 2rem; }
+  h2 { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1.05rem; color: var(--text-bright);
+       letter-spacing: -.01em; }
+  h3 { font-family: 'Syne', sans-serif; font-weight: 600; font-size: .9rem; color: var(--text-dim);
+       text-transform: uppercase; letter-spacing: .06em; margin-bottom: .8rem; }
 
-  label { display: block; margin-bottom: .4rem; font-size: .9rem; color: var(--muted); }
-  input[type=text] { width: 100%; padding: .7rem; border-radius: 8px; border: 1px solid var(--border);
-                     background: var(--bg); color: var(--text); font-size: 1rem; margin-bottom: 1rem; }
+  /* Cards */
+  .card {
+    background: var(--surface); border-radius: 10px; padding: 1.4rem; margin-bottom: 1rem;
+    border: 1px solid var(--border); position: relative; overflow: hidden;
+  }
+  .card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border-light) 30%, var(--border-light) 70%, transparent);
+  }
+  .card-unknown { border-color: var(--red); }
+  .card-unknown::before { background: linear-gradient(90deg, transparent, var(--red) 30%, var(--red) 70%, transparent); }
 
-  button { padding: .7rem 1.4rem; border-radius: 8px; border: none; font-size: .95rem;
-           cursor: pointer; transition: all .15s; font-weight: 600; }
-  .btn-primary { background: var(--highlight); color: #fff; }
-  .btn-primary:hover { filter: brightness(1.15); }
-  .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
-  .btn-danger { background: #c0392b; color: #fff; font-size: .8rem; padding: .5rem .9rem; }
-  .btn-danger:hover { filter: brightness(1.15); }
-  .btn-secondary { background: var(--accent); color: var(--text); }
+  /* Forms */
+  label { display: block; margin-bottom: .35rem; font-size: .78rem; color: var(--text-dim);
+          font-family: 'JetBrains Mono', monospace; letter-spacing: .03em; text-transform: uppercase; }
+  input[type=text], input[type=number] {
+    width: 100%; padding: .6rem .8rem; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); font-size: .9rem; font-family: 'DM Sans', sans-serif;
+    margin-bottom: .8rem; transition: border-color .2s;
+  }
+  input[type=text]:focus, input[type=number]:focus { border-color: var(--amber); outline: none; box-shadow: 0 0 0 2px var(--amber-dim); }
+  input[type=range] { accent-color: var(--amber); }
 
-  .recording { animation: pulse 1s infinite; }
-  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(233,69,96,.5); }
-                      50% { box-shadow: 0 0 0 12px rgba(233,69,96,0); } }
+  /* Buttons */
+  button {
+    padding: .55rem 1.1rem; border-radius: 6px; border: 1px solid var(--border); font-size: .82rem;
+    cursor: pointer; transition: all .15s ease; font-weight: 500; font-family: 'DM Sans', sans-serif;
+    background: var(--surface2); color: var(--text);
+  }
+  button:hover { border-color: var(--border-light); background: var(--border); }
+  .btn-amber { background: var(--amber-dim); color: var(--amber); border-color: rgba(200,149,108,.25); }
+  .btn-amber:hover { background: rgba(200,149,108,.2); border-color: var(--amber); }
+  .btn-red { background: var(--red-dim); color: var(--red); border-color: rgba(191,74,60,.2); }
+  .btn-red:hover { background: rgba(191,74,60,.2); border-color: var(--red); }
+  .btn-green { background: var(--green-dim); color: var(--green); border-color: rgba(106,184,122,.2); }
+  .btn-green:hover { background: rgba(106,184,122,.2); border-color: var(--green); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
 
-  .speaker-list { list-style: none; }
-  .speaker-item { display: flex; justify-content: space-between; align-items: center;
-                  padding: .8rem; border-bottom: 1px solid var(--border); }
-  .speaker-item:last-child { border-bottom: none; }
-  .speaker-name { font-weight: 600; }
-  .speaker-id { font-size: .8rem; color: var(--muted); }
+  .recording { animation: rec-pulse 1.2s ease infinite; }
+  @keyframes rec-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(191,74,60,.4); } 50% { box-shadow: 0 0 0 8px rgba(191,74,60,0); } }
 
-  .status { padding: .6rem 1rem; border-radius: 8px; margin-top: 1rem; font-size: .9rem; }
-  .status-ok { background: rgba(78,204,163,.15); color: var(--ok); }
-  .status-err { background: rgba(192,57,43,.15); color: #e74c3c; }
-  .status-info { background: rgba(15,52,96,.3); color: var(--muted); }
+  /* Tags */
+  .tag { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: .68rem; padding: .15rem .45rem;
+         border-radius: 3px; letter-spacing: .02em; }
+  .tag-active { background: var(--green-dim); color: var(--green); }
+  .tag-inactive { background: var(--amber-dim); color: var(--amber); }
 
-  .samples-info { font-size: .85rem; color: var(--muted); margin: .5rem 0; }
-  .progress-dots { display: flex; gap: .5rem; margin: .8rem 0; }
-  .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--border); }
-  .dot.filled { background: var(--ok); }
-  .dot.active { background: var(--highlight); }
+  /* Status */
+  .status { padding: .5rem .8rem; border-radius: 6px; margin-top: .8rem; font-size: .82rem; }
+  .status-ok { background: var(--green-dim); color: var(--green); }
+  .status-err { background: var(--red-dim); color: var(--red); }
+  .status-info { background: var(--amber-dim); color: var(--amber); }
 
+  /* Sample rows */
+  .sample-row {
+    display: flex; align-items: center; gap: .5rem; padding: .35rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .sample-row:last-child { border-bottom: none; }
+  .sample-row audio { height: 26px; flex-shrink: 0; filter: sepia(.3) saturate(.5) brightness(.85); }
+  .sample-name {
+    font-family: 'JetBrains Mono', monospace; font-size: .75rem; color: var(--text-dim);
+    flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;
+    padding: .2rem .4rem; border-radius: 3px; border: 1px solid transparent; transition: all .15s;
+  }
+  .sample-name:hover { border-color: var(--border-light); color: var(--text); }
+  .sample-name-editing {
+    background: var(--bg); border-color: var(--amber) !important; color: var(--text-bright);
+    outline: none; cursor: text; font-family: 'JetBrains Mono', monospace; font-size: .75rem;
+    padding: .2rem .4rem; border-radius: 3px; flex: 1;
+  }
+
+  select {
+    padding: .3rem .5rem; border-radius: 4px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); font-size: .78rem; font-family: 'DM Sans', sans-serif;
+  }
+  select:focus { border-color: var(--amber); outline: none; }
+
+  .meta { font-family: 'JetBrains Mono', monospace; font-size: .72rem; color: var(--text-dim); }
+  .flex { display: flex; }
+  .gap-sm { gap: .4rem; }
+  .gap-md { gap: .6rem; }
+  .wrap { flex-wrap: wrap; }
+  .between { justify-content: space-between; }
+  .center { align-items: center; }
   .hidden { display: none; }
+  .mt { margin-top: .6rem; }
+  .mb { margin-bottom: .8rem; }
+
+  /* Checkbox */
+  input[type=checkbox] { accent-color: var(--amber); margin-right: .4rem; }
+
+  /* Divider */
+  hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
 </style>
 </head>
 <body>
 
-<h1>🎙️ Speaker ID — Sprecherverwaltung</h1>
+<h1>Speaker <span>ID</span></h1>
+<div class="subtitle">Voice profile management</div>
 
 <!-- Speakers + Samples -->
 <div id="speakerList"></div>
 
-<!-- Add Speaker / Add Samples -->
+<!-- Add Samples -->
 <div class="card">
-  <h2 id="enrollTitle">Neuen Sprecher hinzufügen</h2>
+  <h3>Proben hinzufügen</h3>
+  <label for="speakerName">Sprecher</label>
+  <input type="text" id="speakerName" placeholder="Name eingeben...">
 
-  <label for="speakerName">Name (= Ordnername)</label>
-  <input type="text" id="speakerName" placeholder="z.B. Cedric">
-
-  <p class="samples-info">
-    Sprachproben aufnehmen oder hochladen (je 3-8 Sekunden, mind. 2-3 Proben empfohlen).
-  </p>
-
-  <!-- Secure context: mic recording -->
   <div id="micEnroll">
-    <button class="btn-primary" id="recordBtn" onclick="toggleRecording()">
-      Aufnahme starten
-    </button>
-    <span id="sampleCount" class="samples-info"></span>
-  </div>
-
-  <!-- Insecure context fallback: file upload -->
-  <div id="fileEnroll" class="hidden">
-    <div class="status status-info" style="margin-bottom:1rem">
-      Mikrofon-Zugriff nur über HTTPS möglich. Bitte lade Audiodateien hoch.
+    <div class="flex gap-sm center">
+      <button class="btn-amber" id="recordBtn" onclick="toggleRecording()">Aufnahme</button>
+      <span id="sampleCount" class="meta"></span>
     </div>
-    <input type="file" id="fileInput" accept="audio/*" multiple onchange="handleFileUpload(this)" style="margin:.5rem 0">
   </div>
+  <div id="fileEnroll" class="hidden">
+    <div class="status status-info mb">Kein Mikrofon (HTTPS erforderlich). Dateien hochladen:</div>
+  </div>
+  <input type="file" id="fileInput" accept="audio/*" multiple onchange="handleFileUpload(this)" style="margin:.4rem 0;font-size:.8rem">
 
-  <button class="btn-secondary hidden" id="enrollBtn" onclick="saveSamples()">
-    Proben speichern
-  </button>
-
+  <div class="mt">
+    <button class="hidden btn-green" id="enrollBtn" onclick="saveSamples()">Proben speichern</button>
+  </div>
   <div id="statusBox" class="hidden"></div>
 </div>
 
 <!-- Test -->
 <div class="card">
-  <h2>Sprecher testen</h2>
-  <p class="samples-info">Nimm eine kurze Probe auf oder lade eine Audiodatei hoch.</p>
-  <div id="micTest">
-    <button class="btn-primary" id="testRecordBtn" onclick="toggleTestRecording()">
-      Test-Aufnahme
-    </button>
-  </div>
-  <div id="fileTest" class="hidden">
-    <input type="file" id="testFileInput" accept="audio/*" onchange="handleTestFileUpload(this)">
+  <h3>Erkennung testen</h3>
+  <div class="flex gap-sm">
+    <div id="micTest"><button class="btn-amber" id="testRecordBtn" onclick="toggleTestRecording()">Aufnahme</button></div>
+    <div id="fileTest" class="hidden"><input type="file" id="testFileInput" accept="audio/*" onchange="handleTestFileUpload(this)" style="font-size:.8rem"></div>
   </div>
   <div id="testResult" class="hidden"></div>
 </div>
 
+<hr>
+
 <!-- Settings -->
 <div class="card">
-  <h2>Einstellungen</h2>
-  <label for="settingThreshold">Erkennungsschwelle (0.0 - 1.0)</label>
-  <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:1rem">
+  <h3>Einstellungen</h3>
+  <label>Schwelle</label>
+  <div class="flex gap-md center mb">
     <input type="range" id="settingThresholdRange" min="0.3" max="0.95" step="0.01" style="flex:1" oninput="document.getElementById('settingThreshold').value=this.value">
-    <input type="number" id="settingThreshold" min="0.3" max="0.95" step="0.01" style="width:5rem;padding:.4rem;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text)" oninput="document.getElementById('settingThresholdRange').value=this.value">
+    <input type="number" id="settingThreshold" min="0.3" max="0.95" step="0.01" style="width:4.5rem">
   </div>
-  <p class="samples-info" style="margin-bottom:1rem">Niedriger = mehr Treffer (mehr falsch-positiv). Höher = strenger (mehr unerkannt). Standard: 0.75</p>
+  <div class="meta mb">Niedriger = mehr Treffer. Standard: 0.75</div>
 
-  <label for="settingUnknown">Label für unbekannte Sprecher</label>
-  <input type="text" id="settingUnknown" placeholder="Unbekannt" style="margin-bottom:1rem">
+  <label>Unknown Label</label>
+  <input type="text" id="settingUnknown" placeholder="Unbekannt">
 
-  <label>Nicht erkannte Aufnahmen speichern</label>
-  <div style="margin-bottom:1rem">
-    <label style="display:inline;cursor:pointer"><input type="checkbox" id="settingSaveUnknown" style="margin-right:.3rem">Pipeline-Audio bei unerkannten Sprechern speichern</label>
-  </div>
+  <label style="display:inline;cursor:pointer;text-transform:none;font-family:'DM Sans',sans-serif;font-size:.85rem">
+    <input type="checkbox" id="settingSaveUnknown"> Unerkannte Aufnahmen speichern
+  </label>
 
-  <button class="btn-primary" onclick="saveSettings()">Einstellungen speichern</button>
+  <div class="mt"><button class="btn-amber" onclick="saveSettings()">Speichern</button></div>
   <div id="settingsStatus" class="hidden"></div>
 </div>
 
 <script>
-var mediaRecorder = null;
-var audioChunks = [];
-var samples = [];
-var isRecording = false;
-var hasMic = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
-var basePath = window.location.pathname.endsWith('/') ? window.location.pathname.slice(0, -1) : window.location.pathname;
+var MR=null,chunks=[],samples=[],rec=false,testRec=false,mic=!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia);
+var B=window.location.pathname.endsWith('/')?window.location.pathname.slice(0,-1):window.location.pathname;
+var learnSpeaker=null;
+function E(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function $(id){return document.getElementById(id)}
+function initUI(){if(mic){$('micEnroll').classList.remove('hidden');$('fileEnroll').classList.add('hidden');$('micTest').classList.remove('hidden');$('fileTest').classList.add('hidden')}else{$('micEnroll').classList.add('hidden');$('fileEnroll').classList.remove('hidden');$('micTest').classList.add('hidden');$('fileTest').classList.remove('hidden')}}
+function msg(id,m,t){var el=$(id);el.className='status status-'+t;el.innerHTML=m;el.classList.remove('hidden')}
+function showStatus(m,t){msg('statusBox',m,t)}
+function showTestResult(m,t){msg('testResult',m,t)}
 
-function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+// Recording
+function toggleRecording(){rec?stopRec():startRec()}
+async function startRec(){try{var s=await navigator.mediaDevices.getUserMedia({audio:{sampleRate:16000,channelCount:1,echoCancellation:true}});MR=new MediaRecorder(s,{mimeType:'audio/webm;codecs=opus'});chunks=[];MR.ondataavailable=function(e){chunks.push(e.data)};MR.onstop=function(){samples.push(new Blob(chunks,{type:'audio/webm'}));s.getTracks().forEach(function(t){t.stop()});rec=false;$('recordBtn').textContent='Aufnahme';$('recordBtn').classList.remove('recording');$('sampleCount').textContent=samples.length+' aufgenommen';$('enrollBtn').classList.remove('hidden')};MR.start();rec=true;$('recordBtn').textContent='Stoppen';$('recordBtn').classList.add('recording');showStatus('Sprich jetzt...','info')}catch(e){showStatus('Mikrofon: '+e.message,'err')}}
+function stopRec(){if(MR&&MR.state==='recording')MR.stop()}
+function handleFileUpload(inp){if(!inp.files.length)return;for(var i=0;i<inp.files.length;i++)samples.push(inp.files[i]);$('enrollBtn').classList.remove('hidden');showStatus(samples.length+' Datei(en)','info');inp.value=''}
 
-function initUI() {
-  if (hasMic) {
-    document.getElementById('micEnroll').classList.remove('hidden');
-    document.getElementById('fileEnroll').classList.add('hidden');
-    document.getElementById('micTest').classList.remove('hidden');
-    document.getElementById('fileTest').classList.add('hidden');
-  } else {
-    document.getElementById('micEnroll').classList.add('hidden');
-    document.getElementById('fileEnroll').classList.remove('hidden');
-    document.getElementById('micTest').classList.add('hidden');
-    document.getElementById('fileTest').classList.remove('hidden');
-  }
-}
+async function saveSamples(){var n=$('speakerName').value.trim();if(!n){showStatus('Name eingeben','err');return}if(!samples.length){showStatus('Proben fehlen','err');return}var fd=new FormData();fd.append('name',n);samples.forEach(function(s,i){var x=(s.name&&s.name.includes('.'))?s.name.split('.').pop():'webm';fd.append('sample_'+i,s,'sample_'+Date.now()+'_'+i+'.'+x)});$('enrollBtn').disabled=true;showStatus('Speichere...','info');try{var r=await(await fetch(B+'/api/enroll',{method:'POST',body:fd})).json();if(r.success){showStatus(E(n)+': '+r.samples+' Proben gespeichert','ok');samples=[];$('sampleCount').textContent='';$('enrollBtn').classList.add('hidden');$('speakerName').value='';load()}else showStatus(E(r.error),'err')}catch(e){showStatus(e.message,'err')}$('enrollBtn').disabled=false}
 
-function toggleRecording() { if (isRecording) { stopRecording(); } else { startRecording(); } }
+// Test
+function toggleTestRecording(){testRec?stopTestRec():startTestRec()}
+async function startTestRec(){try{var s=await navigator.mediaDevices.getUserMedia({audio:{sampleRate:16000,channelCount:1,echoCancellation:true}});MR=new MediaRecorder(s,{mimeType:'audio/webm;codecs=opus'});chunks=[];MR.ondataavailable=function(e){chunks.push(e.data)};MR.onstop=async function(){var b=new Blob(chunks,{type:'audio/webm'});s.getTracks().forEach(function(t){t.stop()});testRec=false;$('testRecordBtn').textContent='Aufnahme';$('testRecordBtn').classList.remove('recording');var fd=new FormData();fd.append('audio',b,'test.webm');showTestResult('Analysiere...','info');try{var d=await(await fetch(B+'/api/identify',{method:'POST',body:fd})).json();if(d.speaker)showTestResult('<strong>'+E(d.speaker)+'</strong> &mdash; '+(d.confidence*100).toFixed(1)+'%',d.confidence>=0.75?'ok':'info');else showTestResult('Nicht erkannt','err')}catch(e){showTestResult(e.message,'err')}};MR.start();testRec=true;$('testRecordBtn').textContent='Stoppen';$('testRecordBtn').classList.add('recording');showTestResult('Sprich...','info')}catch(e){showTestResult(e.message,'err')}}
+function stopTestRec(){if(MR&&MR.state==='recording')MR.stop()}
+function handleTestFileUpload(inp){if(!inp.files[0])return;var fd=new FormData();fd.append('audio',inp.files[0],inp.files[0].name);showTestResult('Analysiere...','info');fetch(B+'/api/identify',{method:'POST',body:fd}).then(function(r){return r.json()}).then(function(d){if(d.speaker)showTestResult('<strong>'+E(d.speaker)+'</strong> &mdash; '+(d.confidence*100).toFixed(1)+'%',d.confidence>=0.75?'ok':'info');else showTestResult('Nicht erkannt','err')}).catch(function(e){showTestResult(e.message,'err')});inp.value=''}
 
-async function startRecording() {
-  try {
-    var stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true } });
-    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
-    audioChunks = [];
-    mediaRecorder.ondataavailable = function(e) { audioChunks.push(e.data); };
-    mediaRecorder.onstop = function() {
-      var blob = new Blob(audioChunks, { type: 'audio/webm' });
-      samples.push(blob);
-      stream.getTracks().forEach(function(t) { t.stop(); });
-      isRecording = false;
-      document.getElementById('recordBtn').textContent = 'Aufnahme starten';
-      document.getElementById('recordBtn').classList.remove('recording');
-      document.getElementById('sampleCount').textContent = samples.length + ' Probe(n) aufgenommen';
-      document.getElementById('enrollBtn').classList.remove('hidden');
-      showStatus('Probe aufgenommen. Weitere aufnehmen oder speichern.', 'info');
-    };
-    mediaRecorder.start();
-    isRecording = true;
-    document.getElementById('recordBtn').textContent = 'Aufnahme stoppen';
-    document.getElementById('recordBtn').classList.add('recording');
-    showStatus('Sprich jetzt...', 'info');
-  } catch (e) { showStatus('Mikrofon-Fehler: ' + e.message, 'err'); }
-}
+// Rename (click-to-edit)
+function startRename(speaker,filename,el){var inp=document.createElement('input');inp.type='text';inp.className='sample-name-editing';inp.value=filename;el.replaceWith(inp);inp.focus();inp.select();function finish(){var nv=inp.value.trim();if(!nv||nv===filename){inp.replaceWith(el);return}fetch(B+'/api/speakers/'+encodeURIComponent(speaker)+'/samples/'+encodeURIComponent(filename)+'/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({new_name:nv})}).then(function(r){return r.json()}).then(function(d){if(d.success)load();else{inp.replaceWith(el);showStatus(E(d.error||'Fehler'),'err')}}).catch(function(){inp.replaceWith(el)})}inp.onblur=finish;inp.onkeydown=function(e){if(e.key==='Enter')finish();if(e.key==='Escape'){inp.replaceWith(el)}}}
 
-function stopRecording() { if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop(); }
+// Speaker list
+async function load(){try{var d=await(await fetch(B+'/api/speakers')).json();var c=$('speakerList');if(!d.speakers||!d.speakers.length){c.innerHTML='<div class="card"><h3>Sprecher</h3><div class="meta">Keine Sprecher vorhanden</div></div>';return}
+var sp=d.speakers.filter(function(s){return s.name!=='_unknown'});var unk=d.speakers.find(function(s){return s.name==='_unknown'});var names=sp.map(function(s){return s.name});
+var h=sp.map(function(s){var sl=s.samples.map(function(f){return'<div class="sample-row"><audio controls preload="none" src="'+B+'/api/audio/'+encodeURIComponent(s.name)+'/'+encodeURIComponent(f)+'"></audio><span class="sample-name" onclick="startRename(&quot;'+E(s.name)+'&quot;,&quot;'+E(f)+'&quot;,this)">'+E(f)+'</span><button class="btn-red" style="padding:.15rem .4rem;font-size:.72rem" onclick="delSample(&quot;'+E(s.name)+'&quot;,&quot;'+E(f)+'&quot;)">&times;</button></div>'}).join('');
+var la=(s.name===learnSpeaker);return'<div class="card"><div class="flex between center mb"><div class="flex center gap-sm"><h2>'+E(s.name)+'</h2>'+(s.enrolled?'<span class="tag tag-active">aktiv</span>':'<span class="tag tag-inactive">nicht trainiert</span>')+'</div><button class="btn-red" onclick="delSpeaker(&quot;'+E(s.name)+'&quot;)">&times; Löschen</button></div>'+sl+'<div class="flex gap-sm wrap mt"><span class="meta" style="flex:1;align-self:center">'+s.samples.length+' Proben</span><button class="btn-green" onclick="retrain(&quot;'+E(s.name)+'&quot;)">Trainieren</button><button class="'+(la?'btn-red recording':'btn-amber')+'" onclick="toggleLearn(&quot;'+E(s.name)+'&quot;)">'+(la?'Lernen stoppen':'Lernen (Satellite)')+'</button></div></div>'}).join('');
 
-function handleFileUpload(input) {
-  if (!input.files.length) return;
-  for (var i = 0; i < input.files.length; i++) { samples.push(input.files[i]); }
-  document.getElementById('enrollBtn').classList.remove('hidden');
-  showStatus(samples.length + ' Probe(n) ausgewählt.', 'info');
-  input.value = '';
-}
+if(unk&&unk.samples.length){var opts='<option value="">Zuweisen...</option>'+names.map(function(n){return'<option value="'+E(n)+'">'+E(n)+'</option>'}).join('');
+var ul=unk.samples.map(function(f){return'<div class="sample-row"><audio controls preload="none" src="'+B+'/api/audio/_unknown/'+encodeURIComponent(f)+'"></audio><span class="sample-name" onclick="startRename(&quot;_unknown&quot;,&quot;'+E(f)+'&quot;,this)">'+E(f)+'</span><select onchange="assign(&quot;'+E(f)+'&quot;,this.value)">'+opts+'</select><button class="btn-red" style="padding:.15rem .4rem;font-size:.72rem" onclick="delSample(&quot;_unknown&quot;,&quot;'+E(f)+'&quot;)">&times;</button></div>'}).join('');
+h+='<div class="card card-unknown"><div class="flex between center mb"><h2>Nicht erkannt</h2><span class="meta">'+unk.samples.length+' Aufnahmen</span></div>'+ul+'</div>'}
+c.innerHTML=h}catch(e){$('speakerList').innerHTML='<div class="card" style="color:var(--red)">Fehler</div>'}}
 
-async function saveSamples() {
-  var name = document.getElementById('speakerName').value.trim();
-  if (!name) { showStatus('Bitte einen Namen eingeben.', 'err'); return; }
-  if (samples.length === 0) { showStatus('Bitte mindestens eine Probe aufnehmen.', 'err'); return; }
-  var formData = new FormData();
-  formData.append('name', name);
-  samples.forEach(function(s, i) {
-    var ext = (s.name && s.name.includes('.')) ? s.name.split('.').pop() : 'webm';
-    formData.append('sample_' + i, s, 'sample_' + Date.now() + '_' + i + '.' + ext);
-  });
-  document.getElementById('enrollBtn').disabled = true;
-  showStatus('Speichere Proben...', 'info');
-  try {
-    var res = await fetch(basePath + '/api/enroll', { method: 'POST', body: formData });
-    var data = await res.json();
-    if (data.success) {
-      showStatus(esc(name) + ': Profil gespeichert! (' + data.samples + ' Proben insgesamt)', 'ok');
-      samples = [];
-      document.getElementById('sampleCount').textContent = '';
-      document.getElementById('enrollBtn').classList.add('hidden');
-      document.getElementById('speakerName').value = '';
-      loadSpeakers();
-    } else { showStatus('Fehler: ' + esc(data.error), 'err'); }
-  } catch (e) { showStatus('Netzwerkfehler: ' + e.message, 'err'); }
-  document.getElementById('enrollBtn').disabled = false;
-}
+async function assign(f,to){if(!to)return;try{var d=await(await fetch(B+'/api/move',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from:'_unknown',filename:f,to:to})})).json();if(d.success){load();showStatus('Verschoben nach '+E(to),'ok')}}catch(e){showStatus(e.message,'err')}}
+async function retrain(n){showStatus('Trainiere...','info');try{var d=await(await fetch(B+'/api/speakers/'+encodeURIComponent(n)+'/retrain',{method:'POST'})).json();if(d.success){showStatus(E(n)+': '+d.samples+' Proben trainiert','ok');load()}else showStatus(E(d.error),'err')}catch(e){showStatus(e.message,'err')}}
+async function toggleLearn(n){var ns=(learnSpeaker===n)?null:n;try{var d=await(await fetch(B+'/api/learn',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({speaker:ns})})).json();if(d.success){learnSpeaker=ns;load();if(ns)showStatus('Lernmodus: Sprich zum Satellite &rarr; '+E(ns),'ok');else showStatus('Lernmodus aus','info')}}catch(e){showStatus(e.message,'err')}}
+async function delSample(s,f){if(!confirm('Probe löschen?'))return;await fetch(B+'/api/speakers/'+encodeURIComponent(s)+'/samples/'+encodeURIComponent(f),{method:'DELETE'});load()}
+async function delSpeaker(n){if(!confirm('Sprecher und alle Proben löschen?'))return;await fetch(B+'/api/speakers/'+encodeURIComponent(n),{method:'DELETE'});load()}
 
-var testRecording = false;
-function toggleTestRecording() { if (testRecording) { stopTestRecording(); } else { startTestRecording(); } }
-async function startTestRecording() {
-  try {
-    var stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true } });
-    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
-    audioChunks = [];
-    mediaRecorder.ondataavailable = function(e) { audioChunks.push(e.data); };
-    mediaRecorder.onstop = async function() {
-      var blob = new Blob(audioChunks, { type: 'audio/webm' });
-      stream.getTracks().forEach(function(t) { t.stop(); });
-      testRecording = false;
-      document.getElementById('testRecordBtn').textContent = 'Test-Aufnahme';
-      document.getElementById('testRecordBtn').classList.remove('recording');
-      var formData = new FormData();
-      formData.append('audio', blob, 'test.webm');
-      showTestResult('Analysiere...', 'info');
-      try {
-        var res = await fetch(basePath + '/api/identify', { method: 'POST', body: formData });
-        var data = await res.json();
-        if (data.speaker) { showTestResult('Erkannt: <strong>' + esc(data.speaker) + '</strong> (Confidence: ' + (data.confidence * 100).toFixed(1) + '%)', data.confidence >= 0.75 ? 'ok' : 'info'); }
-        else { showTestResult('Kein Sprecher erkannt.', 'err'); }
-      } catch (e) { showTestResult('Fehler: ' + e.message, 'err'); }
-    };
-    mediaRecorder.start(); testRecording = true;
-    document.getElementById('testRecordBtn').textContent = 'Stoppen';
-    document.getElementById('testRecordBtn').classList.add('recording');
-    showTestResult('Sprich jetzt...', 'info');
-  } catch (e) { showTestResult('Mikrofon-Fehler: ' + e.message, 'err'); }
-}
-function stopTestRecording() { if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop(); }
-function handleTestFileUpload(input) {
-  if (!input.files[0]) return;
-  var formData = new FormData();
-  formData.append('audio', input.files[0], input.files[0].name);
-  showTestResult('Analysiere...', 'info');
-  fetch(basePath + '/api/identify', { method: 'POST', body: formData }).then(function(r) { return r.json(); }).then(function(data) {
-    if (data.speaker) { showTestResult('Erkannt: <strong>' + esc(data.speaker) + '</strong> (Confidence: ' + (data.confidence * 100).toFixed(1) + '%)', data.confidence >= 0.75 ? 'ok' : 'info'); }
-    else { showTestResult('Kein Sprecher erkannt.', 'err'); }
-  }).catch(function(e) { showTestResult('Fehler: ' + e.message, 'err'); });
-  input.value = '';
-}
+// Settings
+async function loadSettings(){try{var d=await(await fetch(B+'/api/settings')).json();$('settingThreshold').value=d.similarity_threshold;$('settingThresholdRange').value=d.similarity_threshold;$('settingUnknown').value=d.unknown_label;$('settingSaveUnknown').checked=d.save_unknown}catch(e){}}
+async function saveSettings(){var el=$('settingsStatus');try{var d=await(await fetch(B+'/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({similarity_threshold:parseFloat($('settingThreshold').value),unknown_label:$('settingUnknown').value.trim(),save_unknown:$('settingSaveUnknown').checked})})).json();msg('settingsStatus',d.success?'Gespeichert':E(d.error),d.success?'ok':'err')}catch(e){msg('settingsStatus',e.message,'err')}}
 
-function showStatus(msg, type) { var el = document.getElementById('statusBox'); el.className = 'status status-' + type; el.innerHTML = msg; el.classList.remove('hidden'); }
-function showTestResult(msg, type) { var el = document.getElementById('testResult'); el.className = 'status status-' + type; el.innerHTML = msg; el.classList.remove('hidden'); }
-
-async function loadSpeakers() {
-  try {
-    var res = await fetch(basePath + '/api/speakers');
-    var data = await res.json();
-    var container = document.getElementById('speakerList');
-    if (!data.speakers || data.speakers.length === 0) {
-      container.innerHTML = '<div class="card"><h2>Registrierte Sprecher</h2><p class="samples-info">Noch keine Sprecher registriert.</p></div>';
-      return;
-    }
-    // Separate _unknown from real speakers
-    var speakers = data.speakers.filter(function(s) { return s.name !== '_unknown'; });
-    var unknown = data.speakers.find(function(s) { return s.name === '_unknown'; });
-    var speakerNames = speakers.map(function(s) { return s.name; });
-
-    var html = speakers.map(function(s) {
-      var sampleList = s.samples.map(function(f) {
-        return '<li style="display:flex;justify-content:space-between;align-items:center;padding:.3rem 0;gap:.5rem">' +
-          '<audio controls preload="none" style="height:28px;flex-shrink:0" src="' + basePath + '/api/audio/' + encodeURIComponent(s.name) + '/' + encodeURIComponent(f) + '"></audio>' +
-          '<span style="font-size:.85rem;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis">' + esc(f) + '</span>' +
-          '<button class="btn-danger" style="font-size:.7rem;padding:.2rem .5rem" onclick="deleteSample(&quot;' + esc(s.name) + '&quot;, &quot;' + esc(f) + '&quot;)">X</button></li>';
-      }).join('');
-      var learnActive = (s.name === currentLearnSpeaker);
-      return '<div class="card">' +
-        '<div style="display:flex;justify-content:space-between;align-items:center">' +
-        '<h2>' + esc(s.name) + (s.enrolled ? ' <span style="color:var(--ok);font-size:.8rem">aktiv</span>' : ' <span style="color:var(--highlight);font-size:.8rem">nicht trainiert</span>') + '</h2>' +
-        '<button class="btn-danger" onclick="deleteSpeaker(&quot;' + esc(s.name) + '&quot;)">Sprecher löschen</button></div>' +
-        '<ul style="list-style:none;margin:.5rem 0">' + sampleList + '</ul>' +
-        '<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.5rem">' +
-        '<p class="samples-info" style="flex:1">' + s.samples.length + ' Probe(n)</p>' +
-        '<button class="btn-primary" onclick="retrainSpeaker(&quot;' + esc(s.name) + '&quot;)">Profil trainieren</button>' +
-        '<button class="' + (learnActive ? 'btn-danger recording' : 'btn-secondary') + '" onclick="toggleLearnMode(&quot;' + esc(s.name) + '&quot;)">' + (learnActive ? 'Lernmodus stoppen' : 'Lernmodus (Satellite)') + '</button>' +
-        '</div></div>';
-    }).join('');
-
-    // Unknown samples section
-    if (unknown && unknown.samples.length > 0) {
-      var assignOptions = '<option value="">Zuweisen an...</option>' + speakerNames.map(function(n) {
-        return '<option value="' + esc(n) + '">' + esc(n) + '</option>';
-      }).join('');
-      var unknownList = unknown.samples.map(function(f) {
-        return '<li style="display:flex;justify-content:space-between;align-items:center;padding:.4rem 0;gap:.5rem">' +
-          '<audio controls preload="none" style="height:28px;flex-shrink:0" src="' + basePath + '/api/audio/_unknown/' + encodeURIComponent(f) + '"></audio>' +
-          '<span style="font-size:.85rem;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis">' + esc(f) + '</span>' +
-          '<select onchange="assignSample(&quot;' + esc(f) + '&quot;, this.value)" style="padding:.3rem;border-radius:4px;background:var(--bg);color:var(--text);border:1px solid var(--border)">' + assignOptions + '</select>' +
-          '<button class="btn-danger" style="font-size:.7rem;padding:.2rem .5rem" onclick="deleteSample(&quot;_unknown&quot;, &quot;' + esc(f) + '&quot;)">X</button></li>';
-      }).join('');
-      html += '<div class="card" style="border-color:var(--highlight)">' +
-        '<h2>Nicht erkannte Aufnahmen <span style="color:var(--highlight);font-size:.8rem">' + unknown.samples.length + ' Probe(n)</span></h2>' +
-        '<p class="samples-info">Anhören und einem Sprecher zuweisen, oder löschen.</p>' +
-        '<ul style="list-style:none;margin:.5rem 0">' + unknownList + '</ul></div>';
-    }
-
-    container.innerHTML = html;
-  } catch (e) {
-    document.getElementById('speakerList').innerHTML = '<div class="card" style="color:#e74c3c">Fehler beim Laden</div>';
-  }
-}
-
-async function assignSample(filename, toSpeaker) {
-  if (!toSpeaker) return;
-  try {
-    var res = await fetch(basePath + '/api/move', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({from: '_unknown', filename: filename, to: toSpeaker})
-    });
-    var data = await res.json();
-    if (data.success) { loadSpeakers(); showStatus('Probe verschoben nach ' + esc(toSpeaker), 'ok'); }
-    else { showStatus('Fehler: ' + esc(data.error), 'err'); }
-  } catch (e) { showStatus('Fehler: ' + e.message, 'err'); }
-}
-
-var currentLearnSpeaker = null;
-
-async function retrainSpeaker(name) {
-  showStatus('Trainiere Profil...', 'info');
-  try {
-    var res = await fetch(basePath + '/api/speakers/' + encodeURIComponent(name) + '/retrain', { method: 'POST' });
-    var data = await res.json();
-    if (data.success) { showStatus(esc(name) + ': Profil neu berechnet (' + data.samples + ' Proben)', 'ok'); loadSpeakers(); }
-    else { showStatus('Fehler: ' + esc(data.error), 'err'); }
-  } catch (e) { showStatus('Fehler: ' + e.message, 'err'); }
-}
-
-async function toggleLearnMode(name) {
-  var newSpeaker = (currentLearnSpeaker === name) ? null : name;
-  try {
-    var res = await fetch(basePath + '/api/learn', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({speaker: newSpeaker}) });
-    var data = await res.json();
-    if (data.success) {
-      currentLearnSpeaker = newSpeaker;
-      loadSpeakers();
-      if (newSpeaker) { showStatus('Lernmodus aktiv: Sprich zum Satellite. Jede Spracheingabe wird als Probe fuer "' + esc(newSpeaker) + '" gespeichert.', 'ok'); }
-      else { showStatus('Lernmodus deaktiviert.', 'info'); }
-    }
-  } catch (e) { showStatus('Fehler: ' + e.message, 'err'); }
-}
-
-async function deleteSample(speaker, filename) {
-  if (!confirm('Probe löschen?')) return;
-  await fetch(basePath + '/api/speakers/' + encodeURIComponent(speaker) + '/samples/' + encodeURIComponent(filename), { method: 'DELETE' });
-  loadSpeakers();
-}
-
-async function deleteSpeaker(name) {
-  if (!confirm('Sprecher und alle Proben löschen?')) return;
-  await fetch(basePath + '/api/speakers/' + encodeURIComponent(name), { method: 'DELETE' });
-  loadSpeakers();
-}
-
-// --- Settings ---
-async function loadSettings() {
-  try {
-    var res = await fetch(basePath + '/api/settings');
-    var data = await res.json();
-    document.getElementById('settingThreshold').value = data.similarity_threshold;
-    document.getElementById('settingThresholdRange').value = data.similarity_threshold;
-    document.getElementById('settingUnknown').value = data.unknown_label;
-    document.getElementById('settingSaveUnknown').checked = data.save_unknown;
-  } catch (e) {}
-}
-async function saveSettings() {
-  var el = document.getElementById('settingsStatus');
-  try {
-    var res = await fetch(basePath + '/api/settings', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        similarity_threshold: parseFloat(document.getElementById('settingThreshold').value),
-        unknown_label: document.getElementById('settingUnknown').value.trim(),
-        save_unknown: document.getElementById('settingSaveUnknown').checked
-      })
-    });
-    var data = await res.json();
-    if (data.success) { el.className = 'status status-ok'; el.innerHTML = 'Gespeichert!'; el.classList.remove('hidden'); }
-    else { el.className = 'status status-err'; el.innerHTML = 'Fehler: ' + esc(data.error); el.classList.remove('hidden'); }
-  } catch (e) { el.className = 'status status-err'; el.innerHTML = 'Fehler: ' + e.message; el.classList.remove('hidden'); }
-}
-
-// Load learn mode status, then speakers
-fetch(basePath + '/api/learn').then(function(r) { return r.json(); }).then(function(data) {
-  currentLearnSpeaker = data.speaker || null;
-  loadSpeakers();
-}).catch(function() { loadSpeakers(); });
-loadSettings();
-initUI();
+fetch(B+'/api/learn').then(function(r){return r.json()}).then(function(d){learnSpeaker=d.speaker||null;load()}).catch(function(){load()});
+loadSettings();initUI();
 </script>
 </body>
 </html>"""
@@ -521,6 +353,20 @@ def create_web_app(speaker_db: SpeakerDatabase) -> web.Application:
         """Get current learn mode status."""
         return web.json_response({"speaker": get_learn_mode()})
 
+    async def rename_sample(request):
+        """Rename an audio sample file."""
+        name = request.match_info["name"]
+        filename = request.match_info["filename"]
+        try:
+            data = await request.json()
+            new_name = data.get("new_name", "").strip()
+            if not new_name:
+                return web.json_response({"success": False, "error": "Name fehlt"})
+            ok = speaker_db.rename_sample(name, filename, new_name)
+            return web.json_response({"success": ok})
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
     async def move_sample(request):
         """Move a sample from one speaker to another."""
         try:
@@ -602,6 +448,7 @@ def create_web_app(speaker_db: SpeakerDatabase) -> web.Application:
         app.router.add_delete(prefix + "/api/speakers/{name}", delete_speaker)
         app.router.add_delete(prefix + "/api/speakers/{name}/samples/{filename}", delete_sample)
         app.router.add_post(prefix + "/api/speakers/{name}/retrain", retrain)
+        app.router.add_post(prefix + "/api/speakers/{name}/samples/{filename}/rename", rename_sample)
         app.router.add_post(prefix + "/api/enroll", enroll)
         app.router.add_post(prefix + "/api/identify", identify)
         app.router.add_post(prefix + "/api/learn", learn_mode)
